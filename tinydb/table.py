@@ -435,7 +435,9 @@ class Table:
 
         When ``doc_ids`` is given, IDs that don't refer to an existing
         document are silently skipped, and the returned list only contains
-        the IDs that were actually updated.
+        the IDs that were actually updated. IDs that occur more than once in
+        ``doc_ids`` are updated only once and appear only once in the
+        returned list (in the order of their first occurrence).
 
         :param fields: the fields that the matching documents will have
                        or a callable that mutates matching documents in place
@@ -461,8 +463,9 @@ class Table:
             # silently skipped, mirroring the behaviour of ``get(doc_ids=...)``
             # (see issue #591). The list of *actually* updated IDs is
             # determined inside the updater so it reflects the table state at
-            # write time.
-            requested_ids = list(doc_ids)
+            # write time. Duplicate IDs are collapsed (keeping the order of
+            # their first occurrence) so each document is updated only once.
+            requested_ids = list(dict.fromkeys(doc_ids))
             updated_ids: list[int] = []
 
             def updater(table: dict):
@@ -632,7 +635,9 @@ class Table:
 
         When ``doc_ids`` is given, IDs that don't refer to an existing
         document are silently skipped, and the returned list only contains
-        the IDs that were actually removed.
+        the IDs that were actually removed. IDs that occur more than once in
+        ``doc_ids`` are removed only once and appear only once in the
+        returned list (in the order of their first occurrence).
 
         :param cond: the condition to check against
         :param doc_ids: a list of document IDs
@@ -644,8 +649,10 @@ class Table:
             # are silently skipped, mirroring the behaviour of
             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
             # removed IDs is determined inside the updater so it reflects the
-            # table state at write time.
-            requested_ids = list(doc_ids)
+            # table state at write time. Duplicate IDs are collapsed (keeping
+            # the order of their first occurrence) so each document is
+            # deleted only once.
+            requested_ids = list(dict.fromkeys(doc_ids))
             removed_ids: list[int] = []
 
             def updater(table: dict):
