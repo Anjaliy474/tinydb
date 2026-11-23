@@ -197,3 +197,9 @@ def test_persist_empty_does_not_wipe_existing_data(tmpdir):
     assert len(table) == 1
     assert table.all() == [{'a': 1}]
     db.close()
+
+
+def test_search_limit_seeded(db):
+    from tinydb import where
+    db.insert_multiple([{'int': 1} for _ in range(3)])
+    assert len(db.search(where('int') == 1, limit=2)) == 2
