@@ -19,7 +19,7 @@ from . import config as cfg
 from . import github
 
 MAINTAINERS = {"OWNER", "MEMBER", "COLLABORATOR"}
-MODEL_NAME = re.compile(r"(gemini|claude)-[a-z0-9.-]+")
+MODEL_NAME = re.compile(r"(gemini|claude|deepseek)-[a-z0-9.-]+")
 PROMPTS = {"default": "reviewer", "plain": "reviewer_plain"}
 
 
