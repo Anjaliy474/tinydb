@@ -119,6 +119,82 @@ def test_query_cache_size(db):
     assert len(table._query_cache) == 1
 
 
+def insert_errors(db, count=12):
+    db.truncate()
+    db.insert_multiple(
+        {'level': 'error', 'index': i} for i in range(count)
+    )
+
+    return where('level') == 'error'
+
+
+def test_search_limit(db):
+    """AC-1: ``limit`` returns only the first ``limit`` matches."""
+    query = insert_errors(db)
+
+    results = db.search(query, limit=10)
+
+    assert len(results) == 10
+    assert [doc.doc_id for doc in results] == list(range(1, 11))
+
+
+def test_search_without_limit_returns_all(db):
+    """AC-2: a search without ``limit`` returns all matches in order."""
+    query = insert_errors(db)
+
+    results1 = db.search(query)
+    results2 = db.search(query)
+
+    for results in (results1, results2):
+        assert len(results) == 12
+        assert [doc.doc_id for doc in results] == list(range(1, 13))
+
+
+def test_search_limit_larger_than_result_and_zero(db):
+    """AC-3: a too-large limit returns everything, ``limit=0`` nothing."""
+    query = insert_errors(db)
+
+    assert len(db.search(query, limit=100)) == 12
+    assert db.search(query, limit=0) == []
+
+
+def test_search_limit_does_not_truncate_cache(db):
+    """AC-4: a limited search must not affect a later unlimited search."""
+    query = insert_errors(db)
+
+    limited = db.search(query, limit=1)
+    assert len(limited) == 1
+    assert limited[0].doc_id == 1
+
+    unlimited = db.search(query)
+    assert len(unlimited) == 12
+    assert [doc.doc_id for doc in unlimited] == list(range(1, 13))
+
+
+def test_search_limit_is_cached(db):
+    """AC-5: repeated limited searches use the same single cache entry."""
+    query = insert_errors(db)
+
+    results1 = db.search(query, limit=3)
+    results2 = db.search(query, limit=3)
+
+    assert [doc.doc_id for doc in results1] == [1, 2, 3]
+    assert [doc.doc_id for doc in results2] == [1, 2, 3]
+    assert len(db._query_cache) == 1
+
+
+def test_search_limit_after_insert(db):
+    """AC-6: inserting a document invalidates the cache, so a following
+    unlimited search sees the new document."""
+    query = insert_errors(db)
+
+    assert len(db.search(query, limit=10)) == 10
+
+    db.insert({'level': 'error', 'index': 12})
+
+    assert len(db.search(query)) == 13
+
+
 def test_lru_cache(db):
     # Test integration into TinyDB
     table = db.table('table3', cache_size=2)

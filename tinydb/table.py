@@ -49,6 +49,10 @@ class Table:
         data, the whole cache is discarded as the query results may have
         changed.
 
+        Cached entries always contain the full result set for a query. A
+        ``limit`` passed to :meth:`search` is applied when the results are
+        returned and therefore never truncates what is cached.
+
     .. admonition:: Customization
 
         For customization, the following class variables can be set:
@@ -246,7 +250,9 @@ class Table:
 
         return list(iter(self))
 
-    def search(self, cond: QueryLike) -> list[Document]:
+    def search(
+        self, cond: QueryLike, limit: Optional[int] = None
+    ) -> list[Document]:
         """
         Search for all documents matching a 'where' cond.
 
@@ -254,9 +260,12 @@ class Table:
         internal cache. The returned list is a fresh copy, but its
         documents are the same objects held by the cache -- treat them as
         read-only, since mutating one (a key or a nested value) corrupts
-        what a later identical search returns.
+        what a later identical search returns. The cache always holds the
+        full result set, the ``limit`` is applied to the returned copy only.
 
         :param cond: the condition to check against
+        :param limit: return at most this many matching documents, or all
+            matching documents if ``None``
         :returns: list of matching documents
         """
 
@@ -264,37 +273,44 @@ class Table:
         # query
         cached_results = self._query_cache.get(cond)
         if cached_results is not None:
-            return cached_results[:]
+            results = cached_results
+        else:
+            # Perform the search by applying the query to all documents.
+            # Then, only if the document matches the query, convert it
+            # to the document class and document ID class.
+            docs = [
+                self.document_class(doc, self.document_id_class(doc_id))
+                for doc_id, doc in self._read_table().items()
+                if cond(doc)
+            ]
 
-        # Perform the search by applying the query to all documents.
-        # Then, only if the document matches the query, convert it
-        # to the document class and document ID class.
-        docs = [
-            self.document_class(doc, self.document_id_class(doc_id))
-            for doc_id, doc in self._read_table().items()
-            if cond(doc)
-        ]
+            # Only cache cacheable queries.
+            #
+            # This weird `getattr` dance is needed to make MyPy happy as
+            # it doesn't know that a query might have a `is_cacheable` method
+            # that is not declared in the `QueryLike` protocol due to it being
+            # optional.
+            # See: https://github.com/python/mypy/issues/1424
+            #
+            # Note also that by default we expect custom query objects to be
+            # cacheable (which means they need to have a stable hash value).
+            # This is to keep consistency with TinyDB's behavior before
+            # `is_cacheable` was introduced which assumed that all queries
+            # are cacheable.
+            is_cacheable: Callable[[], bool] = getattr(cond, 'is_cacheable',
+                                                       lambda: True)
+            if is_cacheable():
+                # Update the query cache with the complete result set. The
+                # limit is applied to the returned copy only below, so a
+                # limited search never truncates what is cached.
+                self._query_cache[cond] = docs[:]
 
-        # Only cache cacheable queries.
-        #
-        # This weird `getattr` dance is needed to make MyPy happy as
-        # it doesn't know that a query might have a `is_cacheable` method
-        # that is not declared in the `QueryLike` protocol due to it being
-        # optional.
-        # See: https://github.com/python/mypy/issues/1424
-        #
-        # Note also that by default we expect custom query objects to be
-        # cacheable (which means they need to have a stable hash value).
-        # This is to keep consistency with TinyDB's behavior before
-        # `is_cacheable` was introduced which assumed that all queries
-        # are cacheable.
-        is_cacheable: Callable[[], bool] = getattr(cond, 'is_cacheable',
-                                                   lambda: True)
-        if is_cacheable():
-            # Update the query cache
-            self._query_cache[cond] = docs[:]
+            results = docs
 
-        return docs
+        # Always return a fresh copy of the full result set, sliced by the
+        # normalised limit (``limit=0`` and negative limits yield an empty
+        # list, a limit larger than the number of matches returns them all).
+        return results[:] if limit is None else results[:max(limit, 0)]
 
     @overload
     def get(self) -> NoReturn: ...
