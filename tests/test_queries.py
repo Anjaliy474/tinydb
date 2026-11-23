@@ -522,6 +522,30 @@ def test_fragment_with_path():
     assert not query({'doc': {'a': 4, 'c': 'yes'}})
 
 
+def test_fragment_query_hash_and_search_ac1_ac2_ac3():
+    # AC-1: Given two queries q1 = Query().home.fragment({'city': 'Pune'}) and q2 = Query().work.fragment({'city': 'Pune'}), when evaluating q1 == q2, then the result is False.
+    q1 = Query().home.fragment({'city': 'Pune'})
+    q2 = Query().work.fragment({'city': 'Pune'})
+    assert (q1 == q2) is False
+
+    # AC-2: Given a database with documents [{'name': 'ann', 'home': {'city': 'Pune'}, 'work': {'city': 'Hyderabad'}}, {'name': 'bob', 'home': {'city': 'Hyderabad'}, 'work': {'city': 'Pune'}}], when executing db.search(User.home.fragment({'city': 'Pune'})) followed by db.search(User.work.fragment({'city': 'Pune'})), then the first search returns [{'name': 'ann', 'home': {'city': 'Pune'}, 'work': {'city': 'Hyderabad'}}] and the second search returns [{'name': 'bob', 'home': {'city': 'Hyderabad'}, 'work': {'city': 'Pune'}}].
+    from tinydb import TinyDB
+    from tinydb.storages import MemoryStorage
+    db = TinyDB(storage=MemoryStorage)
+    User = Query()
+    db.insert_multiple([
+        {'name': 'ann', 'home': {'city': 'Pune'}, 'work': {'city': 'Hyderabad'}},
+        {'name': 'bob', 'home': {'city': 'Hyderabad'}, 'work': {'city': 'Pune'}}
+    ])
+    res1 = db.search(User.home.fragment({'city': 'Pune'}))
+    res2 = db.search(User.work.fragment({'city': 'Pune'}))
+    assert res1 == [{'name': 'ann', 'home': {'city': 'Pune'}, 'work': {'city': 'Hyderabad'}}]
+    assert res2 == [{'name': 'bob', 'home': {'city': 'Hyderabad'}, 'work': {'city': 'Pune'}}]
+
+    # AC-3: Given a document {'city': 'Pune'}, when evaluating Query().fragment({'city': 'Pune'})({'city': 'Pune'}), then the result is True.
+    assert Query().fragment({'city': 'Pune'})({'city': 'Pune'}) is True
+
+
 def test_get_item():
     query = Query()['test'] == 1
 
