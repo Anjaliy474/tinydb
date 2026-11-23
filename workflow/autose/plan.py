@@ -38,7 +38,6 @@ def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
     agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) + "\n\n" +
                repo_context(conf) +
                "\n\nRead only the source files you need, then write spec.md for this issue.")
-    spec = ws.submitted.get("spec.md", "")
 
     def judge(criteria):
         listing = "\n".join(f"{k}: {v}" for k, v in criteria.items())
@@ -46,7 +45,8 @@ def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
                         user=f"Repository: TinyDB (Python).\n\nCriteria:\n{listing}",
                         schema=gates.JUDGE_SCHEMA, budget=budget, client=client)
 
-    return gates.gate_spec(spec, judge)
+    return check_with_revision(conf, agent, ws, "spec.md",
+                               lambda text: gates.gate_spec(text, judge))
 
 
 def run_design(conf, ws, budget, spec: str, reason: str = "", client=None) -> gates.GateResult:
@@ -59,7 +59,28 @@ def run_design(conf, ws, budget, spec: str, reason: str = "", client=None) -> ga
     if reason:
         message += f"\nRevise the design. Reason:\n\n{reason}\n"
     agent.send(message + "\nRead the files you plan to change, then write design.md.")
-    return gates.gate_design(ws.submitted.get("design.md", ""), conf)
+    return check_with_revision(conf, agent, ws, "design.md",
+                               lambda text: gates.gate_design(text, conf))
+
+
+def check_with_revision(conf, agent, ws, name: str, gate) -> gates.GateResult:
+    """Run the stage's gate. If it fails, show the planner the checker's reasons and let it
+    rewrite the artifact, at most `plan_revisions` times (one by default). The gate still makes
+    the final decision. Added after the second run on #3, where one vague criterion stopped the
+    whole run (see the note in ADR-007)."""
+    result = gate(ws.submitted.get(name, ""))
+    for attempt in range(conf.limit("plan_revisions")):
+        if result.passed or gates.front_matter(ws.submitted.get(name, "")).get("status") == "blocked":
+            break
+        print(f"{name} check failed, asking the planner to revise it: " + "; ".join(result.reasons))
+        agent.max_turns += 4  # room for the revision on top of the normal turn limit
+        reasons = "\n".join(f"- {r}" for r in result.reasons)
+        agent.send(f"The checker rejected {name}:\n{reasons}\n\n"
+                   f"Fix exactly these problems, keep everything else, and call write_artifact "
+                   f"again with the whole corrected {name}.")
+        result = gate(ws.submitted.get(name, ""))
+        result.data["revisions"] = attempt + 1
+    return result
 
 
 def main() -> int:
