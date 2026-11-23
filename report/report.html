@@ -5,7 +5,7 @@
 <title>AutoSE A3 report: from issue to pull request</title>
 <style>
   @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
-  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 9.6pt; line-height: 1.36; color: #111; }
+  body { font-family: "Segoe UI", Arial, sans-serif; font-size: 9.6pt; line-height: 1.38; color: #111; }
   h1 { font-size: 16pt; margin: 0 0 2px; }
   h2 { font-size: 12pt; margin: 14px 0 5px; border-bottom: 1px solid #999; padding-bottom: 2px; }
   h3 { font-size: 10.2pt; margin: 9px 0 3px; }
@@ -23,8 +23,8 @@
   .small { font-size: 8.4pt; }
   .mermaid { display: block; width: 100%; margin: 0 auto; }
   .mermaid svg { max-width: 100%; height: auto; }
-  .fig.flow .mermaid svg { max-height: 115mm; }
-  .fig.seq .mermaid svg { max-height: 120mm; }
+  .fig.flow .mermaid svg { max-height: 100mm; }
+  .fig.seq .mermaid svg { max-height: 108mm; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
 <script>mermaid.initialize({ startOnLoad: true, theme: "neutral", flowchart: { useMaxWidth: true }, sequence: { useMaxWidth: true, wrap: true } });</script>
@@ -36,20 +36,23 @@
 Repository: <a href="https://github.com/Anjaliy474/tinydb">github.com/Anjaliy474/tinydb</a>
 (fork of TinyDB pinned at <code>edff96a</code>, tag <code>autose-base</code>)</div>
 
-<p>A maintainer adds the label <code>autose</code> to an issue, or comments <code>/autose</code>.
-A GitHub Actions workflow then writes a spec, plans the change, edits the code, tests it, opens a
-pull request, runs CI and has the PR reviewed by a separate agent. The bot never merges; a person
-does. This report explains how the workflow is split up and why, what I tried and what changed when
-real runs proved me wrong.</p>
+<p>For this assignment I built a GitHub Actions workflow on a fork of TinyDB. A maintainer puts the
+label <code>autose</code> on an issue, or comments <code>/autose</code>, and the workflow writes a
+spec, plans the change, edits the code, tests it, opens a pull request and gets it reviewed by a
+separate agent. It never merges anything. That decision stays with a person.</p>
+
+<p>The agents ran on two model providers. I started on Google's Gemini free tier and later moved to
+DeepSeek's paid API, because the free tier kept running out of quota. Section 2 explains why, and
+the runs from both are in the results.</p>
 
 <h2>1. Architecture</h2>
 
-<p>There are three agents and three plain scripts. The <b>Planner</b> does Stages 1 and 2, the
-<b>Builder</b> Stages 3 and 4, a <b>release script</b> Stage 5, and an <b>independent
-Reviewer</b> Stage 6. An <b>intake</b> step decides whether an event may start a run and a
-<b>finalize</b> step records how many review rounds are used. Each stage runs in its own Actions job
-with only the token permissions it needs. A plain-code module, <code>gates.py</code>, decides whether
-each stage passed; the agents never certify their own work.</p>
+<p>I split the work between three agents and a few plain scripts. The Planner does Stages 1 and 2,
+the Builder does Stages 3 and 4, a release script does Stage 5 and an independent Reviewer does
+Stage 6. Before all of that, an intake step checks whether the person who triggered the run is
+allowed to, and at the end a finalize step records how many review rounds were used. Every stage
+is its own Actions job, and each job only gets the GitHub permissions it needs. Whether a stage
+passed is decided by ordinary code in <code>gates.py</code>, never by the agent that did the work.</p>
 
 <div class="fig flow"><pre class="mermaid">
 flowchart TB
@@ -66,7 +69,7 @@ flowchart TB
   BU -. "tests keep failing: 1 redesign" .-> PL
   G["gates.py<br/>decides pass/fail"] -.- PL & BU & RE & CI & RV
 </pre></div>
-<div class="cap">Figure 1. Component view (simplified; the full view with tools and permissions is
+<div class="cap">Figure 1. Component view (simplified; the full one with tools and permissions is in
 <code>architecture/views/component-view.md</code>).</div>
 
 <table>
@@ -79,10 +82,19 @@ flowchart TB
 <tr><td>6 Review</td><td>Reviewer</td><td><code>review</code>: contents read, PR write</td><td><code>review.md</code></td><td>valid verdict, all 4 audit dimensions, tests were run, defects cite file and line</td></tr>
 </table>
 
-<p>Bounds per run: per round at most 2 builder cycles of 3 attempts and one design revision; at
-most 2 review rounds; turn, token and dollar caps per stage; job timeouts. Every job checks out the
-harness from <code>master</code> into a separate folder from the code being changed, so a PR cannot
-change the code or the rules that judge it.</p>
+<p>A run can't go on forever. In each round the Builder gets at most two cycles of three attempts,
+with one design revision in between, and there are at most two review rounds. Every stage also has
+a turn limit, a token limit, a cost limit and a job timeout. Each job checks out the workflow code
+from <code>master</code> into its own folder, separate from the code being changed, so a pull
+request can't change the rules it is checked against.</p>
+
+<p><b>Models.</b> The first five runs used the Gemini free tier: <code>gemini-3.5-flash-lite</code>
+for planning, <code>gemini-3.5-flash</code> and <code>gemini-3.6-flash</code> for building and
+reviewing, and other Gemini models as fallbacks when one ran out of quota (the one build that
+finished ended up on Flash-Lite). Every run after that used DeepSeek:
+<code>deepseek-flash</code> (DeepSeek V4.1 Flash) for the planner and builder, and at first
+<code>deepseek-v4-pro</code> (V4 Pro) for the reviewer. In the end I put every role on
+<code>deepseek-flash</code> to keep it simple and cheap, and used V4 Pro again only in experiment A.</p>
 
 <div class="fig seq"><pre class="mermaid">
 sequenceDiagram
@@ -105,83 +117,84 @@ sequenceDiagram
   V->>V: diff, read code, run tests, 3 probes
   V->>M: COMMENT review: APPROVE (13:46:24)
 </pre></div>
-<div class="cap">Figure 2. Sequence view of a real run: issue #2, run 45186252584, 6 min 13 s and $0.089
-in total (planner 15 model calls, builder 20, reviewer 11). Full version with per-stage numbers in
-<code>architecture/views/sequence-view.md</code>.</div>
+<div class="cap">Figure 2. Sequence view of a real run on DeepSeek: issue #2, run 45186252584. It took
+6 min 13 s and cost $0.089 (planner 15 model calls, builder 20, reviewer 11). The full version with
+numbers per stage is in <code>architecture/views/sequence-view.md</code>.</div>
 
 <h2 class="pb">2. Design decisions</h2>
 
-<p>Thirteen ADRs in Nygard format are in <code>architecture/decisions/</code>. ADR-001 to 010 were
-committed before any agent code; 011 to 013 were added when runs showed earlier decisions were
-wrong, and the old ones are kept and marked superseded.</p>
+<p>I wrote thirteen ADRs in the Nygard format (<code>architecture/decisions/</code>). The first ten
+were committed before any agent code. The last three came later, when real runs showed that an
+earlier decision was wrong. I kept the old ones and marked them as superseded.</p>
 
 <table class="small">
 <tr><th>ADR</th><th>Decision</th><th>Chosen</th><th>Main option rejected</th><th>Main reason</th><th>Status</th></tr>
 <tr><td>001</td><td>D1 Splitting the work</td><td>3 agents (Planner 1-2, Builder 3-4, Reviewer 6) + scripted release</td><td>one agent, or one per stage</td><td>planning reads, building writes, release pushes, review judges: different permissions; fewer cold starts than 6 agents</td><td>Accepted</td></tr>
-<tr><td>002</td><td>D2 Control flow</td><td>fixed state machine in an unrolled multi-job DAG</td><td>LLM orchestrator deciding next step</td><td>guaranteed termination, no tokens spent on routing</td><td>Accepted</td></tr>
-<tr><td>003</td><td>D3 Hand-offs</td><td>small structured artifacts; reviewer gets only issue, diff, code</td><td>passing transcripts on</td><td>less context, no anchoring of the reviewer, untrusted text kept away from the builder</td><td>Accepted</td></tr>
-<tr><td>004</td><td>D4 State</td><td>Actions artifacts in a run; branch + bot-written comment across runs</td><td>committing <code>.autose/</code> files to the PR</td><td>clean PR diffs, reviewer can't see upstream files, idempotent restarts</td><td>Accepted</td></tr>
-<tr><td>005</td><td>D5 Tools</td><td>small role tool sets + per-job token permissions</td><td>GitHub MCP server in every job</td><td>least privilege enforced by GitHub, small tool schemas</td><td>Accepted</td></tr>
-<tr><td>006</td><td>D6 Models</td><td>Claude Sonnet/Haiku + GPT-5 reviewer</td><td>one model everywhere</td><td>cost tiers, cross-family reviewer</td><td>Superseded by 011</td></tr>
-<tr><td>007</td><td>D7 Checks</td><td>deterministic gates; model judge only for testability</td><td>LLM judge at every stage</td><td>objective oracles exist for Stages 2-6</td><td>Partly superseded by 012</td></tr>
-<tr><td>008</td><td>D8 Reviewer independence</td><td>own job, no upstream artifacts, other model, skeptical evidence-gated rubric</td><td>review inside the builder's job</td><td>stop rubber-stamping</td><td>Accepted</td></tr>
-<tr><td>009</td><td>D9 Safety</td><td>timeouts, caps, env-only issue fetch, path allowlist, secrets stripped from tests</td><td>default timeouts, prompt-only safety</td><td>bounded cost, no script or prompt injection path to secrets or workflows</td><td>Accepted</td></tr>
-<tr><td>010</td><td>D10 Triggers</td><td>label or maintainer comment; one lock per issue around the pipeline</td><td>trigger on every new issue</td><td>no spend by strangers, no branch races</td><td>Accepted</td></tr>
-<tr><td>011</td><td>D6 again</td><td>Gemini free tier, fallback model lists</td><td>paying for Claude</td><td>no paid API access</td><td>Superseded by 013</td></tr>
+<tr><td>002</td><td>D2 Control flow</td><td>fixed state machine in an unrolled multi-job DAG</td><td>LLM orchestrator deciding next step</td><td>guaranteed to end, no tokens spent on routing</td><td>Accepted</td></tr>
+<tr><td>003</td><td>D3 Hand-offs</td><td>small structured artifacts; reviewer gets only issue, diff, code</td><td>passing transcripts on</td><td>less context, reviewer not anchored, untrusted text kept away from the builder</td><td>Accepted</td></tr>
+<tr><td>004</td><td>D4 State</td><td>Actions artifacts in a run; branch + bot-written comment across runs</td><td>committing <code>.autose/</code> files to the PR</td><td>clean PR diffs, reviewer can't see upstream files, safe restarts</td><td>Accepted</td></tr>
+<tr><td>005</td><td>D5 Tools</td><td>small tool sets per role + per-job token permissions</td><td>GitHub MCP server in every job</td><td>least privilege enforced by GitHub, small tool schemas</td><td>Accepted</td></tr>
+<tr><td>006</td><td>D6 Models</td><td>Claude Sonnet/Haiku + GPT-5 reviewer</td><td>one model everywhere</td><td>cost tiers, reviewer from another family</td><td>Superseded by 011</td></tr>
+<tr><td>007</td><td>D7 Checks</td><td>plain-code gates; model judge only for testability</td><td>LLM judge at every stage</td><td>Stages 2-6 have objective checks</td><td>Partly superseded by 012</td></tr>
+<tr><td>008</td><td>D8 Reviewer independence</td><td>own job, no upstream artifacts, other model, skeptical rubric that needs evidence</td><td>review inside the builder's job</td><td>stop rubber-stamping</td><td>Accepted</td></tr>
+<tr><td>009</td><td>D9 Safety</td><td>timeouts, caps, issue fetched via env only, path allowlist, no secrets in test runs</td><td>default timeouts, prompt-only safety</td><td>bounded cost, no injection path to secrets or workflows</td><td>Accepted</td></tr>
+<tr><td>010</td><td>D10 Triggers</td><td>label or maintainer comment; one lock per issue</td><td>trigger on every new issue</td><td>strangers can't spend money, no branch races</td><td>Accepted</td></tr>
+<tr><td>011</td><td>D6 again</td><td>Gemini free tier, fallback model lists</td><td>paying for Claude</td><td>no paid API access at the time</td><td>Superseded by 013</td></tr>
 <tr><td>012</td><td>D7 again</td><td>planner gets one revision with the gate's reasons</td><td>halt on first failed check</td><td>a run died on one fixable sentence</td><td>Accepted</td></tr>
-<tr><td>013</td><td>D6, third time</td><td>DeepSeek (<code>deepseek-flash</code> for every role)</td><td>waiting out free-tier quotas</td><td>4 of 5 free-tier runs failed on overload/quota</td><td>Accepted</td></tr>
+<tr><td>013</td><td>D6, third time</td><td>DeepSeek (<code>deepseek-flash</code> for every role)</td><td>waiting out Gemini quotas</td><td>4 of 5 Gemini runs failed on overload or quota</td><td>Accepted</td></tr>
 </table>
 
 <h3>The three decisions that mattered most</h3>
 
-<p><b>Plain code decides, not the agents (ADR-007, refined by ADR-012).</b> Every stage hands over
-only after <code>gates.py</code> says so: the design gate parses the file and checks that every
-function it names exists; the test gate runs the full suite with a JUnit report and checks that each
-acceptance criterion maps to a new test that passed. This caught real problems: a spec criterion that
-said an existing test "continues to function correctly" was rejected as untestable, and a builder
-that mapped a criterion to a test that didn't exist was sent back. Gates also turned out to be the
-place where my own bugs showed up first (a parser that read only the first line of a wrapped
-criterion), which is a good argument for keeping them small and tested: the harness has 38 unit
-tests. The one thing I changed was the "halt on first failure" rule. Run 45172879048 stopped after
-one minute because of one vague sentence the checker had already explained, so ADR-012 gives the
-planner exactly one revision with the checker's reasons. In the sequence run above, that revision is
-what made Stage 1 pass.</p>
+<p><b>Plain code decides, not the agents (ADR-007, changed by ADR-012).</b> A stage only hands over
+when <code>gates.py</code> says so. The design check parses the plan and makes sure every function it
+names really exists. The test check runs the whole suite and makes sure each acceptance criterion
+points to a new test that passed. These checks caught real mistakes: a criterion that said an existing
+test "continues to function correctly" was rejected as untestable, and a builder that pointed a
+criterion at a test that didn't exist was sent back. They also showed my own bugs first, for example
+a parser that only read the first line of a criterion written over two lines. So I kept the gates
+small and covered them with tests (38 in the end). The one thing I changed was stopping on the first
+failure. Run 45172879048 died after a minute because of one vague sentence that the checker had
+already explained, so now the planner gets exactly one chance to fix the file using the checker's
+reasons. In the run in Figure 2, that second try is what got Stage 1 through.</p>
 
-<p><b>Reviewer independence by structure, not by asking nicely (ADR-008, ADR-003).</b> The reviewer
-runs in its own job with a read-only checkout of the PR head and never downloads the spec, the
-design or any transcript. It sees what a human reviewer sees: the issue, the diff and the code, and
-it can run tests and its own Python probes. Its approval has to be earned: the gate rejects a review
-that didn't run the tests or skipped one of the four audit dimensions, and a blocking defect needs a
-file and line. Because GitHub doesn't let a bot approve its own PR, it posts a COMMENT review with the
-verdict on the first line, and a person stays the only one who can approve and merge. Reading the
-issue instead of the spec matters: the reviewer judges what the user asked for, not the planner's
-interpretation of it.</p>
+<p><b>Keeping the reviewer independent (ADR-008, ADR-003).</b> I didn't want independence to depend
+on the prompt asking nicely, so it's built into the structure. The reviewer runs in its own job with
+a read-only checkout of the PR and never downloads the spec, the design or any of the other agents'
+notes. It gets what a human reviewer would get: the issue, the diff and the code, and it can run the
+tests and its own small Python probes. An approval has to be backed by evidence. The gate rejects a
+review that didn't run the tests or skipped one of the four checks, and every blocking problem needs a
+file and a line. GitHub doesn't let a bot approve its own PR anyway, so the reviewer posts a comment
+with its verdict, and only a person can approve and merge. Because it reads the issue and not the
+spec, it judges what the user asked for, not the planner's version of it.</p>
 
-<p><b>Models: three versions of one decision (ADR-006 &rarr; 011 &rarr; 013).</b> I designed for
-Claude, then found I had no paid API access. I moved to Gemini's free tier and built what that
-needed: retries that read the server's suggested delay, failing fast on a daily quota, a list of
-fallback models per role. Five runs on one issue each found a weakness and fixed it, but four failed
-on overload or quota and the one that worked took about 45 minutes in the builder. On DeepSeek the
-same pipeline ran an issue end to end in about six minutes for nine cents. The structure never
-changed across the three; only the backend and the limits did (DeepSeek needed 40 builder turns
-instead of 20 because it takes one small step per turn). The lesson is in the hindsight section.</p>
+<p><b>The model choice, which I had to make three times (ADR-006, 011, 013).</b> I designed for
+Claude and then found out I had no paid API access. I moved to the Gemini free tier and added what it
+needed: waiting for the delay the server asks for, stopping straight away when the daily quota is
+gone, and a list of fallback models for each role. Each of the five Gemini runs on issue #3 showed me
+something to fix, but four of them failed on overload or quota, and the one that finished spent about
+45 minutes in the builder. When I moved to DeepSeek, the same pipeline ran an issue from start to end
+in about six minutes for nine cents. The structure stayed the same across all three providers. Only the
+model code and the limits changed: DeepSeek needed 40 builder turns instead of 20, because it takes
+one small step at a time.</p>
 
 <h2>3. Decision experiments</h2>
 
-<p>I tested two decisions on five seeded PRs (<code>experiment/seeded_prs/</code>). Four have a bug I
-planted and one is a correct fix; all five pass TinyDB's own suite, so the bugs can't be found by
-just running the tests. The answer key stayed outside the repo until every review was done.</p>
+<p>I tested two decisions on five seeded PRs (<code>experiment/seeded_prs/</code>). Four contain a
+bug I planted and one is a correct fix. All five pass TinyDB's own test suite, so the reviewer can't
+find the bugs just by running the tests. I kept the answer key outside the repository until every
+review was finished. All reviews here ran on DeepSeek.</p>
 
 <ul>
-<li><b>A, tests ADR-008/013 (a stronger reviewer model):</b> same skeptical prompt on
-<code>deepseek-v4-pro</code> instead of <code>deepseek-flash</code>.</li>
-<li><b>B, tests ADR-008's skeptical prompt:</b> same Flash model with a plain prompt (no "assume it's
-wrong", no request for probes).</li>
+<li><b>A</b> tests the reviewer model (ADR-008/013): the same skeptical prompt on DeepSeek V4 Pro
+instead of V4.1 Flash.</li>
+<li><b>B</b> tests the skeptical prompt (ADR-008): Flash with a plain prompt that doesn't say
+"assume it's wrong" and doesn't ask for probes.</li>
 </ul>
 
 <table>
 <tr><th>Seed: planted problem</th><th>Baseline: Flash, skeptical</th><th>A: Pro, skeptical</th><th>B: Flash, plain</th></tr>
-<tr><td>S1: fragment queries made uncacheable (approach is wrong)</td><td>changes, routed to implementation</td><td>changes, routed to <b>design</b></td><td>changes, implementation</td></tr>
+<tr><td>S1: fragment queries made uncacheable (the approach is wrong)</td><td>changes, routed to implementation</td><td>changes, routed to <b>design</b></td><td>changes, implementation</td></tr>
 <tr><td>S2: duplicate ids fixed in remove() only</td><td>changes</td><td>changes</td><td>changes (after one format repair)</td></tr>
 <tr><td>S3: limit applied before caching</td><td>changes</td><td>changes</td><td>changes</td></tr>
 <tr><td>S4: rename crashes on docs without the field</td><td>changes</td><td>changes</td><td>changes</td></tr>
@@ -191,88 +204,93 @@ wrong", no request for probes).</li>
 <tr><td>Tokens / est. cost, all five</td><td>713K / $0.059</td><td>635K / $0.196</td><td>339K / $0.038</td></tr>
 </table>
 
-<p><b>What it showed.</b> Neither decision changed a single verdict: every setup caught all four
-bugs and approved the clean PR, each time with a file, a line and usually a probe that reproduced the
-bug. That is a negative result for both ADRs as stated; on these seeds the structural controls (own
-job, no upstream artifacts, evidence-gated rubric) seem to do the work. Two differences were real.
-The skeptical prompt made the reviewer check much harder before approving (7 probes on the clean PR
-against 3), which is the behaviour ADR-008 asked for. And only the bigger model saw that S1's
-approach, not its code, was wrong, and routed it to the design stage; with round 2 that decides
-whether the change is re-planned or only patched. It cost 3.3 times as much.</p>
+<p><b>What happened.</b> Neither change moved a single verdict. Every setup caught all four bugs and
+approved the clean PR, and each time it named the file and line, usually with a probe that showed the
+bug happening. For both ADRs as I wrote them, that's a negative result. On these seeds, the structure
+(own job, no upstream files, a review that needs evidence) seems to do most of the work. Two
+differences were real, though. With the skeptical prompt the reviewer checked much harder before
+approving: 7 probes on the clean PR instead of 3, which is what ADR-008 was after. And only V4 Pro
+saw that S1's approach was wrong rather than its code, and sent it back to the design stage. In a
+second round that decides whether the change gets re-planned or just patched. It also cost 3.3 times
+as much.</p>
 
-<p><b>What I changed.</b> I kept the cheap Flash reviewer with the skeptical prompt as the default.
-The experiment also exposed two bugs in my harness: the reviewer's <code>model=</code> option didn't
-accept DeepSeek names, and a review whose JSON had the wrong shape crashed the job. ADR-007 already
-allowed one format-repair pass, so the reviewer now gets one chance to resubmit. The next design
-change I'd make is to confirm the routing of a REQUEST_CHANGES verdict with the Pro model only.</p>
+<p><b>What I changed.</b> I kept Flash with the skeptical prompt as the default reviewer. The
+experiment also found two bugs in my harness. The <code>model=</code> option didn't accept DeepSeek
+names, and a review sent back in the wrong JSON shape crashed the job. ADR-007 already allowed one
+repair pass for format problems, so now the reviewer gets one chance to send it again. If I kept going,
+I'd use V4 Pro only to double-check where a "request changes" verdict should be routed.</p>
 
-<h2 class="pb">4. Results</h2>
+<h2>4. Results</h2>
 
-<p>All five issues went through every stage and got a PR the reviewer approved and that passes my
-hidden acceptance tests, which the agents never saw:</p>
+<p>All five issues went through every stage. Each one ended with a PR that the reviewer approved and
+that passes my hidden acceptance tests, which the agents never saw:</p>
 
 <table>
 <tr><th>Issue (type)</th><th>PR</th><th>What the agents did</th><th>Hidden tests</th></tr>
-<tr><td>#2 remove() with duplicate ids (bug)</td><td>#19</td><td>deduplicated ids in update() and remove(); 6 tests</td><td>3/3</td></tr>
-<tr><td>#3 fragment() on two fields (bug)</td><td>#16</td><td>added the field path to the query's cache key; the same fix as my reference</td><td>3/3</td></tr>
-<tr><td>#4 rename operation (feature)</td><td>#23</td><td>new <code>operations.rename</code>, skips docs without the field</td><td>3/3</td></tr>
-<tr><td>#5 search limit (feature)</td><td>#20</td><td>optional <code>limit</code>; the cache keeps the full list</td><td>4/4</td></tr>
-<tr><td>#6 dates (vague)</td><td>#28</td><td>chose to tag dates in JSON and decode them on read</td><td>3/3</td></tr>
+<tr><td>#2 remove() with duplicate ids (bug)</td><td>#19</td><td>removed duplicate ids in update() and remove(); 6 tests</td><td>3/3</td></tr>
+<tr><td>#3 fragment() on two fields (bug)</td><td>#16</td><td>added the field path to the query's cache key, the same fix as mine</td><td>3/3</td></tr>
+<tr><td>#4 rename operation (feature)</td><td>#23</td><td>new <code>operations.rename</code>, leaves docs without the field alone</td><td>3/3</td></tr>
+<tr><td>#5 search limit (feature)</td><td>#20</td><td>optional <code>limit</code>; the cache still keeps the full list</td><td>4/4</td></tr>
+<tr><td>#6 dates (vague)</td><td>#28</td><td>chose to tag dates in the JSON file and turn them back into dates on read</td><td>3/3</td></tr>
 </table>
 
-<p><b>Pass rate per stage</b> over all 14 full runs (results/results.csv): planner 8/14, builder
-5/8, release 5/5, CI 5/5, review 4/5. These include the debugging runs. On the Gemini free tier 0 of
-5 runs finished (overload, quota; the review that failed was out of quota); on DeepSeek 4 of 9 did.
-The five DeepSeek failures were limits and parsing problems in my harness (turn limits set for
-Claude, a cut-off judge answer, wrapped criteria), each fixed and re-run. All runs together used
-about 5.9 million tokens and cost about $0.85; the Gemini runs were free.</p>
+<p>PR #16 for issue #3 was built on the Gemini free tier, but its Gemini reviewer had no quota left,
+so DeepSeek V4 Pro reviewed it later. The other four were built and reviewed on DeepSeek.</p>
 
-<p><b>What the reviewer caught.</b> On the seeded PRs: all four planted bugs, each with a probe, and
-extra real problems I hadn't planted, such as <code>limit=0</code> permanently caching an empty result
-in S3 and the partial update left behind by S4's crash. On the agents' own PRs it approved all five,
-but still raised non-blocking points that are worth a person's attention; on #6 it found that a user
-document whose only key is the reserved date tag would be silently turned into a date.</p>
+<p><b>Pass rate per stage</b> over all 14 full runs (<code>results/results.csv</code>), including the
+runs I used for debugging: planner 8/14, builder 5/8, release 5/5, CI 5/5, review 4/5. On Gemini, 0 of
+5 runs finished. They failed on overload and quota, and the one review that failed was out of quota.
+On DeepSeek, 4 of 9 finished. The other five stopped on problems in my harness (turn limits set for
+Claude, a judge answer that got cut off, criteria written over several lines). I fixed each one and
+ran it again. Altogether the runs used about 5.9 million tokens and cost about $0.85 on DeepSeek. The
+Gemini runs were free.</p>
 
-<p><b>Where it was wrong.</b> The Flash reviewer routed S1 to "implementation" when the approach was
-wrong. On #6 the reserved-key problem is arguably a real defect that it let through as non-blocking.
-And it noticed my seeded tests had "seeded" in their names, a hint I didn't intend to give.</p>
+<p><b>What the reviewer caught.</b> On the seeded PRs it found all four planted bugs, each with a
+probe, plus real problems I hadn't planted: in S3, <code>limit=0</code> permanently caches an empty
+result, and S4's crash leaves the data half updated. It approved all five of the agents' own PRs but
+still pointed out things a person should look at. On #6 it noticed that a user document whose only key
+is the special date tag would quietly turn into a date when read back.</p>
+
+<p><b>Where it got it wrong.</b> The Flash reviewer sent S1 back to "implementation" when the
+approach was the problem. On #6, the date-tag problem is arguably a real bug that it let through as
+non-blocking. It also noticed that my seeded tests had "seeded" in their names, a hint I didn't mean to
+give.</p>
 
 <h2>5. Hindsight</h2>
 
-<p>The decision I would change first is the model decision (ADR-006). I picked models by capability
-and price, and only found out at the first run that I had no access, then that the free tier was too
-slow and too small. I would now treat provider access, quotas and per-model behaviour as a design
-input, check them with a one-call probe before writing any code (the "check models" workflow I added
-late), and build the provider layer and the limits as configuration from day one. Turn limits,
-timeouts and token caps all had to change twice because I had tuned them for a model I never ran.
-Second, I'd let the planner revise once from the start (ADR-012) instead of halting: the
-builder already had retries, and the planner deserved the same.</p>
+<p>The first decision I'd change is the model choice (ADR-006). I picked models for their ability and
+price, and only found out at the first run that I couldn't use them, and then that the Gemini free
+tier was too slow and too small for this. Next time I'd treat access, quotas and how each model
+behaves as part of the design. I'd check them with a one-call test before writing any agent code (the
+"check models" workflow I only added later), and I'd make the provider and all the limits plain
+settings from the start. Turn limits, timeouts and token caps all changed twice because I had set them
+for a model I never actually ran. I'd also give the planner its one revision from day one, instead of
+stopping the run. The builder already had retries, so the planner should have had them too.</p>
 
 <h2>6. Limitations and threats to validity</h2>
 
 <ul>
-<li><b>Small sample.</b> Five issues and five seeded PRs, one run per experiment cell. A 4/4 tie says
-little about cases where the reviewer setups would differ; a single different verdict would change the
-picture.</li>
-<li><b>I wrote everything I measured with.</b> The issues, hidden tests, seeds and prompts are mine,
-so they may suit each other. The hidden tests accept several reasonable answers for the vague issue,
-which also makes it easier to pass.</li>
-<li><b>The system changed during the experiment.</b> Results come from an evolving harness (three
-providers, several fixes). The final configuration, Flash for every role, reviewed only two of the
-five issue PRs; the others were reviewed by Pro.</li>
-<li><b>Round 2 was never exercised for real.</b> Every agent PR was approved in round 1, so the
-rework path (reviewer &rarr; builder or planner) is tested only by unit tests, not by a real run.</li>
-<li><b>Reviewer and builder share a provider</b> and, in the final setup, the same model, so they may
-share blind spots. Only experiment A used a different model.</li>
-<li><b>Safety limits.</b> GitHub-hosted runners don't isolate the network, so code written by the
-builder can make outbound requests while tests run (it has no secrets to send). The hidden tests are
+<li><b>Small sample.</b> Five issues and five seeded PRs, with one run per experiment cell. A 4/4
+against 4/4 tie says little about the cases where the setups would differ, and a single different
+verdict would change the picture.</li>
+<li><b>I made everything I measured with.</b> The issues, hidden tests, seeds and prompts are all
+mine, so they may fit each other too well. The hidden tests for the vague issue accept more than one
+reasonable answer, which also makes it easier to pass.</li>
+<li><b>The system changed while I measured it.</b> The results come from a harness that kept changing
+(two providers in real runs, several fixes). The final setup, Flash for every role, reviewed only two
+of the five issue PRs. V4 Pro reviewed the other three.</li>
+<li><b>Round 2 never ran for real.</b> Every agent PR was approved in round 1, so the path back to
+the builder or planner is only covered by unit tests.</li>
+<li><b>Same provider for builder and reviewer.</b> In the final setup they are even the same model, so
+they may miss the same things. Only experiment A used a different model.</li>
+<li><b>Safety gaps.</b> GitHub's runners don't block network access, so code written by the builder
+can make outbound requests while the tests run. It has no secrets to send, though. The hidden tests are
 now in the repository, so any later run could read them.</li>
 </ul>
 
-<p class="small"><b>AI use.</b> I used Claude Code to help build the harness, check the ADRs for
-consistency and draft documentation, including this report. I reviewed all of it; the design
-decisions and the reasoning are mine. Every run, PR and review mentioned here is real and linked in
-<code>results/runs.md</code>.</p>
+<p class="small"><b>AI use.</b> I used Claude Code as a coding assistant for parts of the harness and
+documentation. I checked everything it produced, and the design decisions in the ADRs are mine. All
+runs, PRs and reviews in this report are real and linked in <code>results/runs.md</code>.</p>
 
 </body>
 </html>
