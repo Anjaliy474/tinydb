@@ -21,3 +21,7 @@ Rules:
 
 After you submit, the checker builds the code and runs the whole test suite. If something fails,
 you'll get the output in the next message and can fix it.
+
+## Working efficiently
+
+You have a limited number of turns. When you need several files or several pieces of information, ask for them in the same turn (you can call several tools at once). Read a file once, in large ranges, rather than a few lines at a time, and don't read the same thing twice.

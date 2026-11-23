@@ -46,17 +46,17 @@ budget:
   run_usd: 3.00
   run_tokens: 2000000
   plan_usd: 0.45
-  plan_tokens: 300000
+  plan_tokens: 600000
   build_usd_per_round: 0.80
-  build_tokens_per_round: 1200000
+  build_tokens_per_round: 3000000
   review_usd_per_round: 0.45
-  review_tokens_per_round: 500000
+  review_tokens_per_round: 1500000
 
 limits:
-  planner_turns: 8
+  planner_turns: 12
   plan_revisions: 1
-  builder_turns: 20
-  reviewer_turns: 12
+  builder_turns: 40
+  reviewer_turns: 25
   attempts_per_cycle: 3
   design_escalations: 1
   review_rounds: 2

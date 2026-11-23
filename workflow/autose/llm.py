@@ -177,17 +177,32 @@ def ask_json(*, model: str, system: str, user: str, schema: dict, budget: Budget
     return json.loads(text)
 
 
+# Every agent created in this process, so the stage can save their tool logs as an artifact.
+CREATED_AGENTS: list = []
+
+
 def make_agent(**kwargs):
     """Pick the agent loop for the model's provider: deepseek-* (ADR-013), gemini-* (ADR-011)
     or claude-* (ADR-006)."""
     model = kwargs["model"]
     if model.startswith("deepseek"):
         from .llm_openai import OpenAIAgent
-        return OpenAIAgent(**kwargs)
-    if model.startswith("gemini"):
+        agent = OpenAIAgent(**kwargs)
+    elif model.startswith("gemini"):
         from .llm_gemini import GeminiAgent
-        return GeminiAgent(**kwargs)
-    return Agent(**kwargs)
+        agent = GeminiAgent(**kwargs)
+    else:
+        agent = Agent(**kwargs)
+    CREATED_AGENTS.append(agent)
+    return agent
+
+
+def save_agent_logs(directory, stage: str) -> None:
+    """Write what each agent did (tool calls, errors, short notes) to <stage>_agent_log.json.
+    It's for people reading the run; no other agent is ever given it (ADR-003)."""
+    entries = [{"model": a.model, "turns": a.turns, "log": a.log} for a in CREATED_AGENTS]
+    (directory / f"{stage}_agent_log.json").write_text(json.dumps(entries, indent=1, default=str),
+                                                      encoding="utf-8")
 
 
 def ask_json_any(**kwargs) -> dict:
