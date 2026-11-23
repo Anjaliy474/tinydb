@@ -482,6 +482,8 @@ def test_gemini_agent_loop_and_retry():
               Tool("done", "finish", {"properties": {"ok": {"type": "boolean"}}},
                    lambda ok: "ok", stops=True)]
     sleeps = []
+    llm_gemini._last_call.clear()
+    interval, llm_gemini.MIN_INTERVAL_S = llm_gemini.MIN_INTERVAL_S, 0
     original = llm_gemini.call_with_retry
     llm_gemini.call_with_retry = lambda fn, *a, **k: original(fn, *a, sleep=sleeps.append, **k)
     try:
@@ -491,7 +493,45 @@ def test_gemini_agent_loop_and_retry():
         assert agent.send("go") == {"ok": True}
     finally:
         llm_gemini.call_with_retry = original
+        llm_gemini.MIN_INTERVAL_S = interval
     assert seen == ["a"] and sleeps == [3.0]
     assert agent.budget.usd == 0 and agent.budget.tokens == 220
     # strict-mode extras are removed for Gemini
     assert "additionalProperties" not in llm_gemini._schema(tools_[0])
+
+
+def test_gemini_daily_quota_fails_fast_and_calls_are_spaced(monkeypatch):
+    from autose import llm_gemini
+
+    class Daily(Exception):
+        code = 429
+
+        def __str__(self):
+            return "Quota exceeded for metric: generate_content_free_tier_requests, quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+
+    class Minute(Exception):
+        code = 429
+
+        def __str__(self):
+            return "quotaId: GenerateRequestsPerMinutePerProjectPerModel-FreeTier, retryDelay: 5s"
+
+    sleeps = []
+    with pytest.raises(llm_gemini.QuotaExhausted, match="daily"):
+        llm_gemini.call_with_retry(lambda **k: (_ for _ in ()).throw(Daily()),
+                                   model="m-daily", sleep=sleeps.append)
+    assert sleeps == []  # no waiting on a daily limit
+    assert llm_gemini.is_daily_quota(Daily()) and not llm_gemini.is_daily_quota(Minute())
+
+    llm_gemini._last_call.clear()
+    monkeypatch.setattr(llm_gemini, "MIN_INTERVAL_S", 4)
+    sleeps.clear()
+    llm_gemini.call_with_retry(lambda **k: "ok", model="m-pace", sleep=sleeps.append)
+    llm_gemini.call_with_retry(lambda **k: "ok", model="m-pace", sleep=sleeps.append)
+    assert len(sleeps) == 1 and 3 < sleeps[0] <= 4  # second call waited for the gap
+
+
+def test_planner_gets_file_list_and_architecture(conf):
+    from autose import plan
+    text = plan.repo_context(conf)
+    assert "tinydb/queries.py" in text and "ARCHITECTURE.md:" in text
+    assert "workflow/autose/gates.py" not in text  # only files the agents may change
