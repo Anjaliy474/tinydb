@@ -1,0 +1,23 @@
+# Run by hand (Actions tab -> AutoSE check models -> Run workflow) to see which Gemini models
+# the GEMINI_API_KEY secret can use, and whether the ones in .autose.yml answer.
+
+name: AutoSE check models
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: ./.github/actions/autose-setup
+      - run: python -m autose.check_models
+        env:
+          PYTHONPATH: workflow
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

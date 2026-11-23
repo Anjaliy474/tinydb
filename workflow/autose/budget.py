@@ -8,12 +8,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # USD per 1M tokens: (input, output, cache read, cache write).
-# Source: Anthropic pricing page (Haiku price is for prompts up to 100K tokens).
+# Claude: Anthropic pricing page (Haiku price is for prompts up to 100K tokens).
+# Gemini models run on the free tier (ADR-011), so they cost nothing; the token caps are what
+# stop a runaway stage there.
 PRICES = {
     "claude-sonnet-5-5": (2.00, 10.00, 0.10, 2.50),
     "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
     "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
 }
+FREE = (0.0, 0.0, 0.0, 0.0)
+
+
+def price(model: str) -> tuple:
+    if model.startswith("gemini"):
+        return FREE
+    return PRICES.get(model, PRICES["claude-opus-5-5"])  # unknown model: assume the dearest
 
 
 class BudgetExceeded(RuntimeError):
@@ -34,7 +43,7 @@ class Budget:
         out = getattr(usage, "output_tokens", 0) or 0
         c_read = getattr(usage, "cache_read_input_tokens", 0) or 0
         c_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        p_in, p_out, p_read, p_write = PRICES.get(model, PRICES["claude-opus-5-5"])
+        p_in, p_out, p_read, p_write = price(model)
         cost = (inp * p_in + out * p_out + c_read * p_read + c_write * p_write) / 1_000_000
         self.usd += cost
         self.tokens += inp + out + c_read + c_write

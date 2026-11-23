@@ -17,7 +17,7 @@ from typing import Callable, Optional
 from . import config as cfg
 from . import gates
 from .budget import Budget, BudgetExceeded
-from .llm import Agent, AgentError
+from .llm import Agent, AgentError, make_agent
 from .plan import run_design
 from .tools import Workspace, builder_tools, tail
 
@@ -47,7 +47,7 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
     base = git(repo, "rev-parse", "HEAD")
     from .github import set_output
     set_output(base_sha=base)
-    budget = budget or Budget(conf["budget"]["build_usd_per_round"], conf["budget"]["run_tokens"],
+    budget = budget or Budget(conf["budget"]["build_usd_per_round"], conf["budget"]["build_tokens_per_round"],
                               f"build-r{round_no}")
     spec = (out / "spec.md").read_text(encoding="utf-8")
     design_path = out / "design.md"
@@ -57,7 +57,7 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
     def builder(ws: Workspace) -> Agent:
         if make_builder:
             return make_builder(ws)
-        return Agent(model=conf.model("builder"),
+        return make_agent(model=conf.model("builder"),
                      system=cfg.prompt("builder", allowed_paths=", ".join(conf.allowed_paths)),
                      tools=builder_tools(ws), budget=budget,
                      max_turns=conf.limit("builder_turns"), client=client)

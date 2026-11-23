@@ -14,7 +14,7 @@ import sys
 from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
-from .llm import Agent, AgentError
+from .llm import Agent, AgentError, make_agent
 from .tools import Workspace, reviewer_tools
 
 MAX_DIFF = 40_000
@@ -57,14 +57,14 @@ def main() -> int:
     base = subprocess.run(["git", "merge-base", f"origin/{conf['base_branch']}", "HEAD"],
                           capture_output=True, text=True, check=True).stdout.strip()
     ws = Workspace(conf, base, out)
-    budget = Budget(conf["budget"]["review_usd_per_round"], conf["budget"]["run_tokens"],
+    budget = Budget(conf["budget"]["review_usd_per_round"], conf["budget"]["review_tokens_per_round"],
                     f"review-r{args.round}")
     model = conf.model("reviewer")
     issue = github.fetch_issue(args.issue)
     diff = ws.git_diff()
     if len(diff) > MAX_DIFF:
         diff = diff[:MAX_DIFF] + "\n[... diff cut, use git_diff or read_file for the rest ...]"
-    agent = Agent(model=model, system=cfg.prompt("reviewer"), tools=reviewer_tools(ws),
+    agent = make_agent(model=model, system=cfg.prompt("reviewer"), tools=reviewer_tools(ws),
                   budget=budget, max_turns=conf.limit("reviewer_turns"), effort="high")
     try:
         agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) +

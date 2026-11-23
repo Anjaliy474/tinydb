@@ -10,12 +10,12 @@ from pathlib import Path
 from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
-from .llm import Agent, AgentError, ask_json
+from .llm import AgentError, make_agent, ask_json_any as ask_json
 from .tools import Workspace, planner_tools
 
 
 def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
-    agent = Agent(model=conf.model("planner"), system=cfg.prompt("planner_spec"),
+    agent = make_agent(model=conf.model("planner"), system=cfg.prompt("planner_spec"),
                   tools=planner_tools(ws, "spec.md"), budget=budget,
                   max_turns=conf.limit("planner_turns"), client=client)
     agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) +
@@ -33,7 +33,7 @@ def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
 
 def run_design(conf, ws, budget, spec: str, reason: str = "", client=None) -> gates.GateResult:
     allowed = ", ".join(conf.allowed_paths)
-    agent = Agent(model=conf.model("planner"),
+    agent = make_agent(model=conf.model("planner"),
                   system=cfg.prompt("planner_design", allowed_paths=allowed),
                   tools=planner_tools(ws, "design.md"), budget=budget,
                   max_turns=conf.limit("planner_turns"), client=client)
@@ -55,7 +55,7 @@ def main() -> int:
     conf = cfg.load()
     out = cfg.artifacts_dir()
     ws = Workspace(conf, "HEAD", out)
-    budget = Budget(conf["budget"]["plan_usd"], conf["budget"]["run_tokens"], "plan")
+    budget = Budget(conf["budget"]["plan_usd"], conf["budget"]["plan_tokens"], "plan")
     try:
         if not args.design_only:
             github.update_state(args.issue, last_stage="plan", note="run started: planning")

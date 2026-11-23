@@ -413,3 +413,58 @@ def test_agent_loop_runs_tools_and_stops():
     assert req["tools"][0]["strict"] is True
     assert req["tools"][0]["input_schema"]["additionalProperties"] is False
     assert req["fallbacks"] == "default"
+
+
+# --- the Gemini backend with a fake client (ADR-011) -------------------------------------------
+
+def test_gemini_agent_loop_and_retry():
+    from google.genai import types
+    from autose import llm_gemini
+    from autose.llm import make_agent
+
+    class Busy(Exception):
+        code = 429
+
+        def __str__(self):
+            return '{"retryDelay": "2s"}'
+
+    usage_meta = types.GenerateContentResponseUsageMetadata(prompt_token_count=100,
+                                                            candidates_token_count=10)
+
+    def resp(*parts):
+        return types.GenerateContentResponse(
+            candidates=[types.Candidate(content=types.Content(role="model", parts=list(parts)),
+                                        finish_reason="STOP")],
+            usage_metadata=usage_meta)
+
+    call = lambda name, args: types.Part(function_call=types.FunctionCall(name=name, args=args))  # noqa: E731
+    queue = [Busy(), resp(call("echo", {"x": "a"})), resp(call("done", {"ok": True}))]
+    seen_contents = []
+
+    def generate_content(model, contents, config):
+        seen_contents.append(len(contents))
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+    seen = []
+    tools_ = [Tool("echo", "echo", {"properties": {"x": {"type": "string"}}},
+                   lambda x: seen.append(x) or f"got {x}"),
+              Tool("done", "finish", {"properties": {"ok": {"type": "boolean"}}},
+                   lambda ok: "ok", stops=True)]
+    sleeps = []
+    original = llm_gemini.call_with_retry
+    llm_gemini.call_with_retry = lambda fn, *a, **k: original(fn, *a, sleep=sleeps.append, **k)
+    try:
+        agent = make_agent(model="gemini-2.5-flash", system="s", tools=tools_,
+                           budget=Budget(1, 10**6, "t"), max_turns=5, client=client)
+        assert type(agent).__name__ == "GeminiAgent"
+        assert agent.send("go") == {"ok": True}
+    finally:
+        llm_gemini.call_with_retry = original
+    assert seen == ["a"] and sleeps == [3.0]
+    assert agent.budget.usd == 0 and agent.budget.tokens == 220
+    # strict-mode extras are removed for Gemini
+    assert "additionalProperties" not in llm_gemini._schema(tools_[0])
