@@ -35,3 +35,9 @@ def test_increment(db):
 def test_decrement(db):
     db.update(decrement('int'), where('char') == 'a')
     assert db.get(where('char') == 'a')['int'] == 0
+
+
+def test_rename_seeded(db):
+    from tinydb.operations import rename
+    db.update(rename('char', 'letter'))
+    assert all('letter' in d and 'char' not in d for d in db)
