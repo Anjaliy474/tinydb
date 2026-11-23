@@ -1,0 +1,55 @@
+# Settings the AutoSE workflow reads for this repository.
+# The workflow code itself knows nothing about TinyDB; everything repo-specific is here.
+
+fork_repo: Anjaliy474/tinydb
+base_branch: master
+trigger_label: autose
+trigger_command: /autose
+
+# Used by Stage 3 (must exit 0) and by the agents' run_build tool.
+build_cmd: python -m compileall -q tinydb && python -c "import tinydb"
+
+# Used by Stage 4 and by the agents' run_tests tool. The gate adds --junitxml itself.
+test_cmd: python -m pytest -o addopts= -q -p no:cacheprovider tests
+
+# Run by the in-run CI job at the PR head (Stage 5 check).
+ci_cmds:
+  - python -m pytest -o addopts= -q -p no:cacheprovider tests
+  - python -m mypy tinydb
+
+# Files the builder may change. Anything else fails the Stage 3 gate.
+allowed_edit_paths:
+  - tinydb/
+  - tests/
+  - docs/
+denied_edit_paths:
+  - .github/
+  - workflow/
+  - .autose.yml
+  - ARCHITECTURE.md
+
+architecture_doc: ARCHITECTURE.md
+
+models:
+  planner: claude-sonnet-5-5
+  judge: claude-haiku-5-5
+  builder: claude-sonnet-5-5
+  reviewer: claude-opus-5-5
+
+# Hard caps (ADR-009). Dollars are estimated from token usage and the price table in budget.py.
+budget:
+  run_usd: 3.00
+  run_tokens: 2000000
+  plan_usd: 0.45
+  build_usd_per_round: 0.80
+  review_usd_per_round: 0.45
+
+limits:
+  planner_turns: 10
+  builder_turns: 20
+  reviewer_turns: 12
+  attempts_per_cycle: 3
+  design_escalations: 1
+  review_rounds: 2
+  command_timeout_s: 180
+  issue_max_chars: 16000
