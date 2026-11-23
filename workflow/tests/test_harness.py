@@ -340,16 +340,16 @@ def test_intake_maps_pr_to_issue_and_respects_round_cap():
                      comment={"body": "/autose", "author_association": "OWNER"})
     used_one = lambda n: [bot(github.render_state({"review_rounds_used": 1}))]  # noqa: E731
     res = intake.decide("issue_comment", pr_event, CONF,
-                        lookup_pr_branch=lambda n: "autose/issue-3", comments=used_one)
+                        lookup_pr=lambda n: {"headRefName": "autose/issue-3"}, comments=used_one)
     assert res["issue"] == "3" and res["rounds_left"] == "1" and res["first_round"] == "2"
     used_two = lambda n: [bot(github.render_state({"review_rounds_used": 2}))]  # noqa: E731
-    assert intake.decide("issue_comment", pr_event, CONF, lambda n: "autose/issue-3",
+    assert intake.decide("issue_comment", pr_event, CONF, lambda n: {"headRefName": "autose/issue-3"},
                          used_two)["proceed"] == "false"
     reset = event(issue={"number": 9, "state": "open", "pull_request": {}},
                   comment={"body": "/autose reset", "author_association": "OWNER"})
-    assert intake.decide("issue_comment", reset, CONF, lambda n: "autose/issue-3",
+    assert intake.decide("issue_comment", reset, CONF, lambda n: {"headRefName": "autose/issue-3"},
                          used_two)["rounds_left"] == "2"
-    stranger_pr = intake.decide("issue_comment", pr_event, CONF, lambda n: "feature-x")
+    stranger_pr = intake.decide("issue_comment", pr_event, CONF, lambda n: {"headRefName": "feature-x"})
     assert stranger_pr["proceed"] == "false"
 
 
@@ -360,6 +360,33 @@ def test_workflow_copies_match():
              (".github/actions/autose-setup/action.yml", "workflow/github/autose-setup-action.yml")]
     for real, copy in pairs:
         assert (REPO / real).read_bytes() == (REPO / copy).read_bytes(), f"{copy} is out of date"
+
+
+def test_intake_review_mode():
+    def on_pr(body):
+        return event(issue={"number": 12, "state": "open", "pull_request": {}},
+                     comment={"body": body, "author_association": "OWNER"})
+
+    seeded = lambda n: {"headRefName": "seeded/bad-limit", "body": "Fixes #5. Seeded PR."}  # noqa: E731
+    res = intake.decide("issue_comment", on_pr("/autose review model=gemini-3.6-flash prompt=plain"),
+                        CONF, seeded)
+    assert res["proceed"] == "true" and res["mode"] == "review"
+    assert (res["issue"], res["pr"]) == ("5", "12")
+    assert res["review_model"] == "gemini-3.6-flash" and res["review_prompt"] == "reviewer_plain"
+    plain = intake.decide("issue_comment", on_pr("/autose review"), CONF, seeded)
+    assert plain["review_model"] == "" and plain["review_prompt"] == "reviewer"
+    # values that could be used for injection are refused
+    bad = intake.decide("issue_comment", on_pr("/autose review model=$(curl x)"), CONF, seeded)
+    assert bad["proceed"] == "false"
+    no_issue = intake.decide("issue_comment", on_pr("/autose review"), CONF,
+                             lambda n: {"headRefName": "x", "body": "no link"})
+    assert no_issue["proceed"] == "false"
+    on_issue = intake.decide("issue_comment", event(comment={"body": "/autose review",
+                                                            "author_association": "OWNER"}), CONF)
+    assert on_issue["proceed"] == "false"
+    typo = intake.decide("issue_comment", event(comment={"body": "/autose revew",
+                                                        "author_association": "OWNER"}), CONF)
+    assert typo["proceed"] == "false"
 
 
 # --- budget and the agent loop with a fake client ------------------------------------------------
