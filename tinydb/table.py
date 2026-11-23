@@ -246,7 +246,7 @@ class Table:
 
         return list(iter(self))
 
-    def search(self, cond: QueryLike) -> list[Document]:
+    def search(self, cond: QueryLike, limit: Optional[int] = None) -> list[Document]:
         """
         Search for all documents matching a 'where' cond.
 
@@ -273,7 +273,7 @@ class Table:
             self.document_class(doc, self.document_id_class(doc_id))
             for doc_id, doc in self._read_table().items()
             if cond(doc)
-        ]
+        ][:limit]
 
         # Only cache cacheable queries.
         #
