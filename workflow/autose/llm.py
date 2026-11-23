@@ -178,15 +178,24 @@ def ask_json(*, model: str, system: str, user: str, schema: dict, budget: Budget
 
 
 def make_agent(**kwargs):
-    """Pick the agent loop for the model's provider (ADR-011): gemini-* or claude-*."""
-    if kwargs["model"].startswith("gemini"):
+    """Pick the agent loop for the model's provider: deepseek-* (ADR-013), gemini-* (ADR-011)
+    or claude-* (ADR-006)."""
+    model = kwargs["model"]
+    if model.startswith("deepseek"):
+        from .llm_openai import OpenAIAgent
+        return OpenAIAgent(**kwargs)
+    if model.startswith("gemini"):
         from .llm_gemini import GeminiAgent
         return GeminiAgent(**kwargs)
     return Agent(**kwargs)
 
 
 def ask_json_any(**kwargs) -> dict:
-    if kwargs["model"].startswith("gemini"):
+    model = kwargs["model"]
+    if model.startswith("deepseek"):
+        from .llm_openai import ask_json as openai_ask_json
+        return openai_ask_json(**kwargs)
+    if model.startswith("gemini"):
         from .llm_gemini import ask_json as gemini_ask_json
         return gemini_ask_json(**kwargs)
     return ask_json(**kwargs)

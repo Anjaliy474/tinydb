@@ -15,6 +15,9 @@ PRICES = {
     "claude-sonnet-5-5": (2.00, 10.00, 0.10, 2.50),
     "claude-haiku-5-5": (0.10, 0.50, 0.01, 0.125),
     "claude-opus-5-5": (4.00, 20.00, 0.20, 5.00),
+    # DeepSeek pricing page, peak-hour rates (off-peak is half), 2026-11-23 (ADR-013).
+    "deepseek-flash": (0.30, 1.20, 0.006, 0.30),
+    "deepseek-v4-pro": (1.32, 3.96, 0.044, 1.32),
 }
 FREE = (0.0, 0.0, 0.0, 0.0)
 
