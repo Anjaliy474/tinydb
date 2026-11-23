@@ -1,0 +1,31 @@
+diff --git a/tests/test_queries.py b/tests/test_queries.py
+index e939eb4..f82d6a2 100644
+--- a/tests/test_queries.py
++++ b/tests/test_queries.py
+@@ -527,3 +527,13 @@ def test_get_item():
+ 
+     assert query({'test': 1})
+     assert not query({'test': 0})
++
++
++def test_fragment_on_two_fields_seeded():
++    from tinydb import TinyDB
++    from tinydb.storages import MemoryStorage
++    db = TinyDB(storage=MemoryStorage)
++    db.insert_multiple([{'home': {'c': 'P'}, 'work': {'c': 'H'}}, {'home': {'c': 'H'}, 'work': {'c': 'P'}}])
++    q = Query()
++    assert [d.doc_id for d in db.search(q.home.fragment({'c': 'P'}))] == [1]
++    assert [d.doc_id for d in db.search(q.work.fragment({'c': 'P'}))] == [2]
+diff --git a/tinydb/queries.py b/tinydb/queries.py
+index e106c5d..91f371c 100644
+--- a/tinydb/queries.py
++++ b/tinydb/queries.py
+@@ -496,7 +496,7 @@ class Query(QueryInstance):
+ 
+         return self._generate_test(
+             lambda value: test(value),
+-            ('fragment', freeze(document)),
++            None,  # fragment queries on different fields collided in the cache
+             allow_empty_path=True
+         )
+ 

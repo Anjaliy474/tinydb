@@ -1,0 +1,107 @@
+diff --git a/base/tinydb/operations.py b/ref/tinydb/operations.py
+index 3f6c6ab..2a99b50 100644
+--- a/base/tinydb/operations.py
++++ b/ref/tinydb/operations.py
+@@ -73,3 +73,11 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
+         doc[field] -= 1
+ 
+     return transform
++
++
++def rename(old: str, new: str) -> Callable[[MutableMapping], None]:
++    """Rename field ``old`` to ``new``; documents without ``old`` are unchanged."""
++    def transform(doc: MutableMapping):
++        if old in doc:
++            doc[new] = doc.pop(old)
++    return transform
+diff --git a/base/tinydb/queries.py b/ref/tinydb/queries.py
+index e106c5d..1eef42e 100644
+--- a/base/tinydb/queries.py
++++ b/ref/tinydb/queries.py
+@@ -496,7 +496,7 @@ class Query(QueryInstance):
+ 
+         return self._generate_test(
+             lambda value: test(value),
+-            ('fragment', freeze(document)),
++            ('fragment', self._path, freeze(document)),
+             allow_empty_path=True
+         )
+ 
+diff --git a/base/tinydb/storages.py b/ref/tinydb/storages.py
+index 59337a1..71eecbb 100644
+--- a/base/tinydb/storages.py
++++ b/ref/tinydb/storages.py
+@@ -76,6 +76,13 @@ class Storage(ABC):
+         pass
+ 
+ 
++def _json_default(obj):
++    import datetime
++    if isinstance(obj, (datetime.datetime, datetime.date)):
++        return obj.isoformat()
++    raise TypeError(f'Object of type {type(obj).__name__} is not JSON serializable')
++
++
+ class JSONStorage(Storage):
+     """
+     Store the data in a JSON file.
+@@ -144,7 +151,9 @@ class JSONStorage(Storage):
+         self._handle.seek(0)
+ 
+         # Serialize the database state using the user-provided arguments
+-        serialized = json.dumps(data, **self.kwargs)
++        kwargs = dict(self.kwargs)
++        kwargs.setdefault('default', _json_default)
++        serialized = json.dumps(data, **kwargs)
+ 
+         # Write the serialized data to the file
+         try:
+diff --git a/base/tinydb/table.py b/ref/tinydb/table.py
+index 76470aa..cbc0180 100644
+--- a/base/tinydb/table.py
++++ b/ref/tinydb/table.py
+@@ -246,7 +246,7 @@ class Table:
+ 
+         return list(iter(self))
+ 
+-    def search(self, cond: QueryLike) -> list[Document]:
++    def search(self, cond: QueryLike, limit: Optional[int] = None) -> list[Document]:
+         """
+         Search for all documents matching a 'where' cond.
+ 
+@@ -264,7 +264,7 @@ class Table:
+         # query
+         cached_results = self._query_cache.get(cond)
+         if cached_results is not None:
+-            return cached_results[:]
++            return cached_results[:limit]
+ 
+         # Perform the search by applying the query to all documents.
+         # Then, only if the document matches the query, convert it
+@@ -294,7 +294,7 @@ class Table:
+             # Update the query cache
+             self._query_cache[cond] = docs[:]
+ 
+-        return docs
++        return docs[:limit]
+ 
+     @overload
+     def get(self) -> NoReturn: ...
+@@ -462,7 +462,7 @@ class Table:
+             # (see issue #591). The list of *actually* updated IDs is
+             # determined inside the updater so it reflects the table state at
+             # write time.
+-            requested_ids = list(doc_ids)
++            requested_ids = list(dict.fromkeys(doc_ids))
+             updated_ids: list[int] = []
+ 
+             def updater(table: dict):
+@@ -645,7 +645,7 @@ class Table:
+             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
+             # removed IDs is determined inside the updater so it reflects the
+             # table state at write time.
+-            requested_ids = list(doc_ids)
++            requested_ids = list(dict.fromkeys(doc_ids))
+             removed_ids: list[int] = []
+ 
+             def updater(table: dict):

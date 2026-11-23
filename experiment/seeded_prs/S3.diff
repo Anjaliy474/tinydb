@@ -1,0 +1,36 @@
+diff --git a/tests/test_tables.py b/tests/test_tables.py
+index a94005e..1f1df7e 100644
+--- a/tests/test_tables.py
++++ b/tests/test_tables.py
+@@ -197,3 +197,9 @@ def test_persist_empty_does_not_wipe_existing_data(tmpdir):
+     assert len(table) == 1
+     assert table.all() == [{'a': 1}]
+     db.close()
++
++
++def test_search_limit_seeded(db):
++    from tinydb import where
++    db.insert_multiple([{'int': 1} for _ in range(3)])
++    assert len(db.search(where('int') == 1, limit=2)) == 2
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..21894ec 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -246,7 +246,7 @@ class Table:
+ 
+         return list(iter(self))
+ 
+-    def search(self, cond: QueryLike) -> list[Document]:
++    def search(self, cond: QueryLike, limit: Optional[int] = None) -> list[Document]:
+         """
+         Search for all documents matching a 'where' cond.
+ 
+@@ -273,7 +273,7 @@ class Table:
+             self.document_class(doc, self.document_id_class(doc_id))
+             for doc_id, doc in self._read_table().items()
+             if cond(doc)
+-        ]
++        ][:limit]
+ 
+         # Only cache cacheable queries.
+         #

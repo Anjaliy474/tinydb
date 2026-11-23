@@ -1,0 +1,32 @@
+diff --git a/tests/test_operations.py b/tests/test_operations.py
+index 3a6f814..9f79649 100644
+--- a/tests/test_operations.py
++++ b/tests/test_operations.py
+@@ -35,3 +35,9 @@ def test_increment(db):
+ def test_decrement(db):
+     db.update(decrement('int'), where('char') == 'a')
+     assert db.get(where('char') == 'a')['int'] == 0
++
++
++def test_rename_seeded(db):
++    from tinydb.operations import rename
++    db.update(rename('char', 'letter'))
++    assert all('letter' in d and 'char' not in d for d in db)
+diff --git a/tinydb/operations.py b/tinydb/operations.py
+index 3f6c6ab..96bc254 100644
+--- a/tinydb/operations.py
++++ b/tinydb/operations.py
+@@ -73,3 +73,13 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
+         doc[field] -= 1
+ 
+     return transform
++
++
++def rename(old: str, new: str) -> Callable[[MutableMapping], None]:
++    """
++    Rename the field ``old`` to ``new``.
++    """
++    def transform(doc: MutableMapping):
++        doc[new] = doc.pop(old)
++
++    return transform
