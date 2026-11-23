@@ -1,0 +1,325 @@
+# The AutoSE pipeline, called by autose.yml once intake has said yes.
+#
+# Round 1: plan -> build -> release -> ci -> review -> finalize
+# Round 2 (only if the reviewer asked for changes and a round is left):
+#          rework -> release -> ci -> review -> finalize
+#
+# Every job checks out two copies of the repo:
+#   harness/  master, read only: the AutoSE code, prompts and .autose.yml (trusted)
+#   repo/     the code being changed (master, or the PR branch)
+# so a PR can never change the code or rules that check it (ADR-009).
+# Agent jobs use persist-credentials: false, so no GitHub token is left in repo/.git.
+
+name: AutoSE pipeline
+
+on:
+  workflow_call:
+    inputs:
+      issue: {type: string, required: true}
+      rounds_left: {type: string, required: true}
+      first_round: {type: string, required: true}
+    secrets:
+      ANTHROPIC_API_KEY: {required: true}
+
+permissions: {}
+
+env:
+  PYTHONPATH: ${{ github.workspace }}/harness/workflow
+  AUTOSE_REPO: ${{ github.workspace }}/repo
+  AUTOSE_CONFIG: ${{ github.workspace }}/harness/.autose.yml
+  # Outside the checkout, so artifacts never end up in a diff.
+  AUTOSE_ARTIFACTS: ${{ github.workspace }}-artifacts
+  BRANCH: autose/issue-${{ inputs.issue }}
+
+jobs:
+  # ---------------------------------------------------------------- round 1
+  plan:
+    name: "Stages 1-2: planner"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: read, issues: write}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+      - run: python -m autose.plan --issue "${{ inputs.issue }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-plan
+          path: ${{ env.AUTOSE_ARTIFACTS }}
+          if-no-files-found: ignore
+
+  build-r1:
+    name: "Stages 3-4: builder (round 1)"
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions: {contents: read}
+    outputs:
+      base_sha: ${{ steps.build.outputs.base_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+        with: {extras: "pytest"}
+      - uses: actions/download-artifact@v4
+        with: {name: r1-plan, path: "${{ env.AUTOSE_ARTIFACTS }}"}
+      - id: build
+        run: python -m autose.build --round 1
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-build
+          path: ${{ env.AUTOSE_ARTIFACTS }}
+          if-no-files-found: ignore
+
+  release-r1:
+    name: "Stage 5: release (round 1)"
+    needs: build-r1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write, pull-requests: write, issues: write}
+    outputs:
+      pr_number: ${{ steps.release.outputs.pr_number }}
+      head_sha: ${{ steps.release.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.build-r1.outputs.base_sha }}"}
+      - uses: ./harness/.github/actions/autose-setup
+      - uses: actions/download-artifact@v4
+        with: {name: r1-build, path: "${{ env.AUTOSE_ARTIFACTS }}"}
+      - id: release
+        working-directory: repo
+        run: python -m autose.release --issue "${{ inputs.issue }}" --round 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-release
+          path: ${{ env.AUTOSE_ARTIFACTS }}/pr.md
+          if-no-files-found: ignore
+
+  ci-r1:
+    name: "Stage 5 check: CI (round 1)"
+    needs: release-r1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read, statuses: write, pull-requests: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.release-r1.outputs.head_sha }}", persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+        with: {extras: "pytest mypy"}
+      - run: python -m autose.ci --pr "${{ needs.release-r1.outputs.pr_number }}" --sha "${{ needs.release-r1.outputs.head_sha }}" --round 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-ci
+          path: ${{ env.AUTOSE_ARTIFACTS }}/ci.md
+          if-no-files-found: ignore
+
+  review-r1:
+    name: "Stage 6: independent review (round 1)"
+    needs: [release-r1, ci-r1]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Read-only code access, no artifacts from earlier stages are downloaded here (ADR-008).
+    permissions: {contents: read, issues: read, pull-requests: write}
+    outputs:
+      verdict: ${{ steps.review.outputs.verdict }}
+      routing: ${{ steps.review.outputs.routing }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.release-r1.outputs.head_sha }}", fetch-depth: 0, persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+        with: {extras: "pytest"}
+      - id: review
+        working-directory: repo
+        run: python -m autose.review --issue "${{ inputs.issue }}" --pr "${{ needs.release-r1.outputs.pr_number }}" --round "${{ inputs.first_round }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-review
+          path: ${{ env.AUTOSE_ARTIFACTS }}
+          if-no-files-found: ignore
+
+  finalize-r1:
+    name: "Record round 1"
+    needs: [plan, build-r1, release-r1, ci-r1, review-r1]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, issues: write}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+      - run: >-
+          python -m autose.finalize --issue "${{ inputs.issue }}" --round "${{ inputs.first_round }}"
+          --results '{"plan":"${{ needs.plan.result }}","build":"${{ needs.build-r1.result }}","release":"${{ needs.release-r1.result }}","ci":"${{ needs.ci-r1.result }}","review":"${{ needs.review-r1.result }}"}'
+          --verdict "${{ needs.review-r1.outputs.verdict }}" --routing "${{ needs.review-r1.outputs.routing }}"
+          ${{ inputs.rounds_left == '1' && '--last' || '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # ---------------------------------------------------------------- round 2
+  rework-r2:
+    name: "Rework after review (round 2)"
+    needs: [release-r1, review-r1]
+    if: needs.review-r1.outputs.verdict == 'REQUEST_CHANGES' && inputs.rounds_left == '2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions: {contents: read}
+    outputs:
+      base_sha: ${{ steps.build.outputs.base_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.release-r1.outputs.head_sha }}", persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+        with: {extras: "pytest"}
+      # spec.md from the planner, the latest design.md from the builder job, and the review.
+      - uses: actions/download-artifact@v4
+        with: {name: r1-plan, path: "${{ env.AUTOSE_ARTIFACTS }}"}
+      - uses: actions/download-artifact@v4
+        with: {name: r1-build, path: "${{ env.AUTOSE_ARTIFACTS }}"}
+      - uses: actions/download-artifact@v4
+        with: {name: r1-review, path: "${{ env.AUTOSE_ARTIFACTS }}/r1"}
+      - id: build
+        run: >-
+          python -m autose.build --round 2 --review "$AUTOSE_ARTIFACTS/r1/review.md"
+          --route "${{ needs.review-r1.outputs.routing }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-build
+          path: |
+            ${{ env.AUTOSE_ARTIFACTS }}/*.md
+            ${{ env.AUTOSE_ARTIFACTS }}/*.patch
+            ${{ env.AUTOSE_ARTIFACTS }}/*.json
+          if-no-files-found: ignore
+
+  release-r2:
+    name: "Stage 5: release (round 2)"
+    needs: [release-r1, rework-r2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {contents: write, pull-requests: write, issues: write}
+    outputs:
+      pr_number: ${{ steps.release.outputs.pr_number }}
+      head_sha: ${{ steps.release.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.release-r1.outputs.head_sha }}"}
+      - uses: ./harness/.github/actions/autose-setup
+      - uses: actions/download-artifact@v4
+        with: {name: r2-build, path: "${{ env.AUTOSE_ARTIFACTS }}"}
+      - id: release
+        working-directory: repo
+        run: python -m autose.release --issue "${{ inputs.issue }}" --round 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-release
+          path: ${{ env.AUTOSE_ARTIFACTS }}/pr.md
+          if-no-files-found: ignore
+
+  ci-r2:
+    name: "Stage 5 check: CI (round 2)"
+    needs: release-r2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read, statuses: write, pull-requests: read}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.release-r2.outputs.head_sha }}", persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+        with: {extras: "pytest mypy"}
+      - run: python -m autose.ci --pr "${{ needs.release-r2.outputs.pr_number }}" --sha "${{ needs.release-r2.outputs.head_sha }}" --round 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-ci
+          path: ${{ env.AUTOSE_ARTIFACTS }}/ci.md
+          if-no-files-found: ignore
+
+  review-r2:
+    name: "Stage 6: independent review (round 2)"
+    needs: [release-r2, ci-r2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read, issues: read, pull-requests: write}
+    outputs:
+      verdict: ${{ steps.review.outputs.verdict }}
+      routing: ${{ steps.review.outputs.routing }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: repo, ref: "${{ needs.release-r2.outputs.head_sha }}", fetch-depth: 0, persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+        with: {extras: "pytest"}
+      - id: review
+        working-directory: repo
+        run: python -m autose.review --issue "${{ inputs.issue }}" --pr "${{ needs.release-r2.outputs.pr_number }}" --round 2
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-review
+          path: ${{ env.AUTOSE_ARTIFACTS }}
+          if-no-files-found: ignore
+
+  finalize-r2:
+    name: "Record round 2"
+    needs: [review-r1, rework-r2, release-r2, ci-r2, review-r2]
+    if: always() && needs.review-r1.outputs.verdict == 'REQUEST_CHANGES' && inputs.rounds_left == '2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, issues: write}
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: harness, persist-credentials: false}
+      - uses: ./harness/.github/actions/autose-setup
+      - run: >-
+          python -m autose.finalize --issue "${{ inputs.issue }}" --round 2
+          --results '{"build":"${{ needs.rework-r2.result }}","release":"${{ needs.release-r2.result }}","ci":"${{ needs.ci-r2.result }}","review":"${{ needs.review-r2.result }}"}'
+          --verdict "${{ needs.review-r2.outputs.verdict }}" --routing "${{ needs.review-r2.outputs.routing }}"
+          --last
+        env:
+          GH_TOKEN: ${{ github.token }}

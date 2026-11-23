@@ -1,0 +1,64 @@
+# AutoSE: turn an issue into a tested, reviewed pull request.
+# A maintainer starts it with the label `autose` or a comment starting with `/autose`.
+# Design: architecture/decisions (ADR-001 to ADR-010).
+
+name: AutoSE
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+# Nothing by default; each job asks only for what it needs (ADR-005).
+permissions: {}
+
+jobs:
+  intake:
+    # Cheap filter first, so ordinary comments don't even start a runner.
+    if: >-
+      (github.event_name == 'issues' && github.event.label.name == 'autose') ||
+      (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, '/autose'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.intake.outputs.proceed }}
+      issue: ${{ steps.intake.outputs.issue }}
+      rounds_left: ${{ steps.intake.outputs.rounds_left }}
+      first_round: ${{ steps.intake.outputs.first_round }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/autose-setup
+      - id: intake
+        run: python -m autose.intake
+        env:
+          PYTHONPATH: workflow
+          GH_TOKEN: ${{ github.token }}
+
+  pipeline:
+    needs: intake
+    if: needs.intake.outputs.proceed == 'true'
+    # One lock per issue around the whole pipeline, so two runs for the same issue
+    # (from the issue and from its PR) never interleave (ADR-010).
+    concurrency:
+      group: autose-issue-${{ needs.intake.outputs.issue }}
+      cancel-in-progress: false
+    # The most any job inside may use; each job narrows it further.
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      statuses: write
+    uses: ./.github/workflows/autose-pipeline.yml
+    with:
+      issue: ${{ needs.intake.outputs.issue }}
+      rounds_left: ${{ needs.intake.outputs.rounds_left }}
+      first_round: ${{ needs.intake.outputs.first_round }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
