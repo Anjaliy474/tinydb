@@ -4,6 +4,9 @@ This view shows every component, the tools each one may use, the GitHub token pe
 Actions job it runs in, and how components call each other. It reflects ADR-001 (split), ADR-002
 (control flow), ADR-005 (tools) and ADR-008 (reviewer independence).
 
+Models changed twice after this view was first drawn (ADR-011, then ADR-013). The boxes show the
+current setup; the structure, permissions and information barriers are unchanged.
+
 ```mermaid
 flowchart LR
     subgraph GH["GitHub (fork: Anjaliy474/tinydb)"]
@@ -18,14 +21,14 @@ flowchart LR
     subgraph WF["autose-pipeline.yml (reusable call, concurrency: autose-issue-N)"]
 
         subgraph PLAN["plan job · contents:read, issues:write"]
-            A1["Agent 1: Planner<br/>Stage 1 Requirements, Stage 2 Design<br/>model: Sonnet 5.5"]
-            J1["Testability judge<br/>Haiku 5.5"]
+            A1["Agent 1: Planner<br/>Stage 1 Requirements, Stage 2 Design<br/>model: deepseek-flash"]
+            J1["Testability judge<br/>deepseek-flash"]
             T1["tools: read_file, list_files,<br/>search_code, write_artifact"]
         end
 
         subgraph BUILD["build-r1 / rework-r2 job · contents:read"]
             ORCH["orchestrator.py<br/>bounded FSM: 3 attempts per cycle,<br/>1 design escalation"]
-            A2["Agent 2: Builder<br/>Stage 3 Implement, Stage 4 Test<br/>model: Sonnet 5.5"]
+            A2["Agent 2: Builder<br/>Stage 3 Implement, Stage 4 Test<br/>model: deepseek-flash"]
             A1b["Agent 1 (fresh context)<br/>Stage 2 only, on escalation"]
             T2["tools: read_file, edit_file (allowlist),<br/>run_build, run_tests, git_diff,<br/>write_artifact"]
         end
@@ -43,7 +46,7 @@ flowchart LR
         end
 
         subgraph REV["review-r1 / review-r2 job · contents:read, issues:read, pull-requests:write"]
-            A3["Agent 3: Independent Reviewer<br/>Stage 6<br/>model: GPT-5 (fallback Opus 5.5)"]
+            A3["Agent 3: Independent Reviewer<br/>Stage 6<br/>model: deepseek-flash (Pro in experiment A)"]
             T3["tools: read_file, search_code,<br/>git_diff, run_tests, write_artifact;<br/>gh pr review --comment"]
         end
 

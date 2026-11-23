@@ -43,38 +43,63 @@ and there's a diagram in [architecture/views](architecture/views).
 
 ## Models
 
-| Role | Model |
-| :--- | :--- |
-| Planner (stages 1–2) | Claude Sonnet 5.5 |
-| Spec testability check | Claude Haiku 5.5 |
-| Builder (stages 3–4) | Claude Sonnet 5.5 |
-| Release and CI (stage 5) | none, it's a plain script |
-| Reviewer (stage 6) | GPT-5, or Claude Opus 5.5 if there's no OpenAI key |
+All agents run on DeepSeek's API. Every role uses `deepseek-flash` (DeepSeek V4.1 Flash-1017).
+Release and CI are plain scripts with no model.
+
+This is the third model setup. I started with Claude (ADR-006), had no paid access, moved to
+Gemini's free tier (ADR-011), and moved again to DeepSeek when four of five free-tier runs failed
+on rate limits and quotas (ADR-013). The code still supports all three: the model names in
+`.autose.yml` decide which one is used.
 
 ## Running it
 
 On any issue in this repo, a maintainer either adds the label `autose` or writes a comment starting
 with `/autose`. Labels and comments from other people are ignored. If two runs start for the same
-issue, the second one waits for the first.
+issue, the second one waits for the first. `/autose reset` starts the review-round count again.
+
+`/autose review` on any open PR that says which issue it fixes (`Fixes #N`) runs only the
+independent reviewer. For experiments it takes `model=<name>` and `prompt=plain`.
 
 To set it up in your own fork you need to:
 
 1. Turn on Issues in the repo settings.
 2. In Settings → Actions → General, allow GitHub Actions to create pull requests.
-3. Add `ANTHROPIC_API_KEY` (and `OPENAI_API_KEY` if you want the GPT reviewer) as repository secrets.
-4. Set a spending limit with your model provider before the first run.
+3. Add `DEEPSEEK_API_KEY` as a repository secret (or `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` with
+   matching model names in `.autose.yml`).
+4. Top up only a small balance with the provider before the first run.
+
+## Results
+
+All five test issues went through the whole workflow and got a PR that the reviewer approved and
+that passes my hidden acceptance tests:
+
+| Issue | PR | Hidden tests |
+| :--- | :--- | :--- |
+| #2 remove() with duplicate ids | [#19](https://github.com/Anjaliy474/tinydb/pull/19) | 3/3 |
+| #3 fragment() on two fields | [#16](https://github.com/Anjaliy474/tinydb/pull/16) | 3/3 |
+| #4 rename operation | [#23](https://github.com/Anjaliy474/tinydb/pull/23) | 3/3 |
+| #5 search limit | [#20](https://github.com/Anjaliy474/tinydb/pull/20) | 4/4 |
+| #6 dates (the vague one) | [#28](https://github.com/Anjaliy474/tinydb/pull/28) | 3/3 |
+
+On five seeded PRs (four with a planted bug, one clean), the reviewer caught all four bugs and
+approved the clean one, with each of the three reviewer setups I tried
+([experiment/variants.md](experiment/variants.md)). Every run, with its link, tokens and cost, is
+in [results/runs.md](results/runs.md). All runs together used about 5.9 million tokens, roughly
+$0.85 on DeepSeek; the Gemini runs were free.
+
+None of these PRs are merged. That's left to a person, on purpose.
 
 ## What's in this repo
 
-- `architecture/decisions/` – the ADRs, one per design decision
-- `architecture/views/` – component view, stage map, and later the sequence view of a real run
-- `workflow/` – the workflow files, agent code and prompts (in progress)
+- `architecture/decisions/` – the ADRs, one per design decision; superseded ones are kept
+- `architecture/views/` – component view, stage map, and the sequence view of a real run
+- `.github/workflows/` – the workflows GitHub runs; `workflow/github/` is a copy of them
+- `workflow/` – agent code, prompts and the harness tests
 - `experiment/issues/` – the five issues I opened to test the workflow
-- `experiment/seeded_prs/` – PRs with known bugs, used to check the reviewer (to do)
-- `results/` – results and links to every run, PR and review (to do)
-
-The hidden acceptance tests for the issues are kept outside the repo while the runs happen, so the
-agents can't see them. I'll add them under `experiment/hidden_tests/` at the end.
+- `experiment/hidden_tests/` – the hidden acceptance tests (added after all runs were done)
+- `experiment/seeded_prs/` – the seeded PR diffs and which bug each one has
+- `experiment/variants.md` – the two reviewer experiments and what they showed
+- `results/` – `results.csv`, `runs.md` and the script that builds them from GitHub
 
 ## AI use
 
