@@ -17,7 +17,8 @@ from .tools import path_allowed, run_command
 
 VAGUE_WORDS = ["fast", "faster", "quickly", "better", "easy", "easily", "user-friendly", "robust",
                "efficient", "appropriate", "appropriately", "properly", "seamless", "seamlessly",
-               "nice", "nicely", "clean", "reasonable", "intuitive", "etc"]
+               "nice", "nicely", "clean", "reasonable", "intuitive", "etc", "correctly",
+               "as expected", "as before", "works", "normally"]
 
 
 @dataclass

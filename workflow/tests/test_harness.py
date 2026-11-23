@@ -551,3 +551,35 @@ def test_gemini_retries_a_hanging_request(monkeypatch):
     sleeps = []
     assert llm_gemini.call_with_retry(flaky, model="m-timeout", sleep=sleeps.append) == "ok"
     assert len(calls) == 2 and sleeps == [10.0]
+
+
+def test_planner_gets_one_revision_after_a_failed_gate(conf, tmp_path, monkeypatch):
+    from autose import plan
+    vague = GOOD_SPEC.replace("then the result is False", "then it continues to function correctly")
+    sent = []
+
+    class Scripted:
+        max_turns = 8
+
+        def __init__(self, ws, drafts):
+            self.ws, self.drafts = ws, list(drafts)
+
+        def send(self, message):
+            sent.append(message)
+            self.ws.submitted["spec.md"] = self.drafts.pop(0)
+            return {}
+
+    ws = tools.Workspace(conf, "HEAD", tmp_path)
+    monkeypatch.setattr(plan, "repo_context", lambda c: "files")
+    monkeypatch.setattr(plan, "ask_json", lambda **k: {"criteria": [
+        {"id": "AC-1", "testable": True, "reason": ""}, {"id": "AC-2", "testable": True, "reason": ""}]})
+
+    monkeypatch.setattr(plan, "make_agent", lambda **k: Scripted(ws, [vague, GOOD_SPEC]))
+    result = plan.run_spec(conf, ws, Budget(1, 10**6, "t"), {"number": 3, "title": "t", "body": "b"})
+    assert result.passed and result.data["revisions"] == 1
+    assert "correctly" in sent[1]  # the checker's reason was passed back
+
+    sent.clear()
+    monkeypatch.setattr(plan, "make_agent", lambda **k: Scripted(ws, [vague, vague]))
+    result = plan.run_spec(conf, ws, Budget(1, 10**6, "t"), {"number": 3, "title": "t", "body": "b"})
+    assert not result.passed and len(sent) == 2  # only one revision, then it stops

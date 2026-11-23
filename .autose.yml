@@ -54,6 +54,7 @@ budget:
 
 limits:
   planner_turns: 8
+  plan_revisions: 1
   builder_turns: 20
   reviewer_turns: 12
   attempts_per_cycle: 3
