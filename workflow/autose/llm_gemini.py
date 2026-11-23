@@ -15,12 +15,16 @@ from .budget import Budget
 from .llm import MAX_TOOL_OUTPUT, AgentError, Tool, _short
 
 MAX_WAIT_S = 600       # give up on one call after waiting this long in total
+REQUEST_TIMEOUT_MS = 120_000
 RETRIES = 8
 
 
 def make_client():
     from google import genai
-    return genai.Client()  # reads GEMINI_API_KEY from the environment
+    from google.genai import types
+    # A request that hangs fails after 2 minutes and is retried, instead of blocking the job
+    # until GitHub cancels it (that is what happened on the first run).
+    return genai.Client(http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS))  # reads GEMINI_API_KEY
 
 
 def _schema(tool: Tool) -> dict:
@@ -81,12 +85,15 @@ def call_with_retry(fn, *args, sleep=time.sleep, **kwargs):
                     f"the free daily quota for {model} is used up; it resets at midnight "
                     "Pacific time (13:30 IST). Restart with /autose after that, or switch this "
                     "role to another model in .autose.yml") from exc
-            if code not in (429, 500, 503) or attempt == RETRIES - 1:
+            timed_out = "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
+            if (code not in (429, 500, 503) and not timed_out) or attempt == RETRIES - 1:
                 raise
+            if timed_out:
+                code = "timeout"
             delay = min(_retry_delay(exc) if code == 429 else 10.0 * (attempt + 1), MAX_WAIT_S - waited)
             if delay <= 0:
                 raise
-            print(f"[gemini] HTTP {code}, waiting {delay:.0f}s (attempt {attempt + 1})")
+            print(f"[gemini] {model}: {code}, waiting {delay:.0f}s (attempt {attempt + 1})", flush=True)
             sleep(delay)
             waited += delay
 

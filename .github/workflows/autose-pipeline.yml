@@ -31,6 +31,8 @@ env:
   # Outside the checkout, so artifacts never end up in a diff.
   AUTOSE_ARTIFACTS: ${{ github.workspace }}-artifacts
   BRANCH: autose/issue-${{ inputs.issue }}
+  # Show the agents' progress live in the log (and keep it if a job is cancelled).
+  PYTHONUNBUFFERED: "1"
 
 jobs:
   # ---------------------------------------------------------------- round 1

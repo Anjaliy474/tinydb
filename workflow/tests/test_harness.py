@@ -535,3 +535,19 @@ def test_planner_gets_file_list_and_architecture(conf):
     text = plan.repo_context(conf)
     assert "tinydb/queries.py" in text and "ARCHITECTURE.md:" in text
     assert "workflow/autose/gates.py" not in text  # only files the agents may change
+
+
+def test_gemini_retries_a_hanging_request(monkeypatch):
+    from autose import llm_gemini
+    monkeypatch.setattr(llm_gemini, "MIN_INTERVAL_S", 0)
+    calls = []
+
+    def flaky(**kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TimeoutError("The read operation timed out")
+        return "ok"
+
+    sleeps = []
+    assert llm_gemini.call_with_retry(flaky, model="m-timeout", sleep=sleeps.append) == "ok"
+    assert len(calls) == 2 and sleeps == [10.0]

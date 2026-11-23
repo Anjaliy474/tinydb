@@ -84,6 +84,7 @@ jobs:
       AUTOSE_REPO: ${{ github.workspace }}/repo
       AUTOSE_CONFIG: ${{ github.workspace }}/harness/.autose.yml
       AUTOSE_ARTIFACTS: ${{ github.workspace }}-artifacts
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
         with: {path: harness, persist-credentials: false}
