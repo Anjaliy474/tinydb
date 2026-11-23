@@ -52,9 +52,21 @@ def section(text: str, title: str) -> str:
 
 
 def acceptance_criteria(spec: str) -> dict[str, str]:
+    """AC-n entries, including ones the planner wrapped over several lines (runs on #4 and #6
+    failed because only the first line was read)."""
     body = section(spec, "Acceptance criteria")
-    return {m.group(1): m.group(2).strip()
-            for m in re.finditer(r"^\s*-\s*\**(AC-\d+)\**\s*:\s*(.+)$", body, re.M)}
+    criteria: dict[str, str] = {}
+    current = None
+    for line in body.splitlines():
+        m = re.match(r"^\s*-\s*\**(AC-\d+)\**\s*:\s*(.*)$", line)
+        if m:
+            current = m.group(1)
+            criteria[current] = m.group(2).strip()
+        elif current and line.strip() and not line.lstrip().startswith("- "):
+            criteria[current] += " " + line.strip()
+        elif not line.strip():
+            current = None
+    return criteria
 
 
 def add_diagnostics(path: Path, result: GateResult) -> None:

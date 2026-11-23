@@ -792,3 +792,24 @@ def test_agent_logs_are_saved(tmp_path):
     saved = json.loads((tmp_path / "build-r1_agent_log.json").read_text())
     assert saved[0]["model"] == "claude-sonnet-5-5" and saved[0]["log"][0]["tool"] == "done"
     llm.CREATED_AGENTS.clear()
+
+
+
+def test_wrapped_acceptance_criteria_are_read_whole():
+    spec = """---
+stage: 1
+status: ok
+---
+## Acceptance criteria
+- AC-1: Given a db and `now = datetime(2024, 5, 17)`,
+  when `db.insert({'when': now})` is called, then no exception is raised.
+- AC-2: Given that insert, when the db is reopened, then the value is `'2024-05-17T00:00:00'`.
+
+## Assumptions
+- none
+"""
+    criteria = gates.acceptance_criteria(spec)
+    assert list(criteria) == ["AC-1", "AC-2"]
+    assert "then no exception is raised" in criteria["AC-1"]
+    ok = lambda c: {"criteria": [{"id": k, "testable": True, "reason": ""} for k in c]}  # noqa: E731
+    assert gates.gate_spec(spec, ok).passed
