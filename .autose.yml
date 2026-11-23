@@ -32,13 +32,13 @@ architecture_doc: ARCHITECTURE.md
 
 # DeepSeek (ADR-013, which supersedes the Gemini free tier of ADR-011). Each role lists models
 # in order; when one fails for good (no balance, not offered, keeps erroring) the next is used.
-# The reviewer skips whichever model built the change, so it reviews on the stronger Pro model.
+# All roles use deepseek-flash (DeepSeek V4.1 Flash-1017), by choice, to keep one model and low cost.
 # Gemini (ADR-011) or Claude (ADR-006) still work: put their model names here instead.
 models:
-  planner: [deepseek-flash, deepseek-v4-pro]
+  planner: [deepseek-flash]
   judge: [deepseek-flash]
-  builder: [deepseek-flash, deepseek-v4-pro]
-  reviewer: [deepseek-v4-pro, deepseek-flash]
+  builder: [deepseek-flash]
+  reviewer: [deepseek-flash]
 
 # Hard caps (ADR-009). Dollars are estimated from token usage and the price table in
 # budget.py (DeepSeek at peak-hour prices, so the estimate errs on the high side).

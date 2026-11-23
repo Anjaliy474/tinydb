@@ -97,7 +97,7 @@ def gate_spec(spec: str, judge: Optional[Callable[[dict[str, str]], dict]] = Non
     if result.passed and judge is not None:
         verdict = judge(criteria)
         result.data["judge"] = verdict
-        seen = {c["id"]: c for c in verdict.get("criteria", [])}
+        seen = judge_answers(verdict)
         for ac_id in criteria:
             item = seen.get(ac_id)
             if item is None:
@@ -105,6 +105,19 @@ def gate_spec(spec: str, judge: Optional[Callable[[dict[str, str]], dict]] = Non
             elif not item["testable"]:
                 result.fail(f"{ac_id} judged not testable: {item['reason']}")
     return result
+
+
+def judge_answers(verdict) -> dict:
+    """Accept the judge's answer as {"criteria": [{"id": ...}]} or as {"AC-1": {...}}, and match
+    ids loosely ("ac-1", "AC-1:"). DeepSeek doesn't always follow the exact shape (run on #6)."""
+    items = verdict.get("criteria") if isinstance(verdict, dict) else None
+    if items is None and isinstance(verdict, dict):
+        items = [dict(v, id=k) for k, v in verdict.items() if isinstance(v, dict)]
+    out = {}
+    for item in items or []:
+        key = re.sub(r"[^A-Z0-9-]", "", str(item.get("id", "")).upper())
+        out[key] = {"testable": bool(item.get("testable")), "reason": item.get("reason", "")}
+    return out
 
 
 # --- Stage 2: design.md ------------------------------------------------------------------

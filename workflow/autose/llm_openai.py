@@ -170,6 +170,9 @@ def ask_json(*, model: str, system: str, user: str, schema: dict, budget: Budget
         messages=[{"role": "system", "content": system + "\n\nAnswer with JSON matching this "
                    f"schema, and nothing else:\n{json.dumps(schema)}"},
                   {"role": "user", "content": user}],
-        response_format={"type": "json_object"}, max_tokens=4000)
+        response_format={"type": "json_object"}, max_tokens=16000)
     charge(budget, model, response.usage)
-    return json.loads(response.choices[0].message.content or "{}")
+    try:
+        return json.loads(response.choices[0].message.content or "{}")
+    except json.JSONDecodeError as exc:  # cut-off answer (run on #4): report, don't crash
+        raise AgentError(f"{model} returned unreadable JSON: {exc}") from exc

@@ -625,7 +625,7 @@ def test_gemini_server_errors_retry_then_end_cleanly(monkeypatch):
 
 def test_config_model_lists(conf, monkeypatch):
     assert conf.models("builder")[0] == conf.model("builder")
-    assert len(conf.models("builder")) > 1
+    assert len(conf.models("builder")) >= 1
     monkeypatch.setenv("AUTOSE_REVIEWER_MODEL", "gemini-x")
     assert conf.models("reviewer") == ["gemini-x"]
 
@@ -662,6 +662,7 @@ def test_reviewer_skips_the_builders_model():
 
 def test_build_switches_model_when_quota_runs_out(sandbox, tmp_path):
     from autose.llm import QuotaExhausted
+    sandbox.raw["models"]["builder"] = ["model-a", "model-b"]
     out = tmp_path / "out"
     out.mkdir()
     (out / "spec.md").write_text(GOOD_SPEC)
