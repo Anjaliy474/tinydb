@@ -73,3 +73,22 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
         doc[field] -= 1
 
     return transform
+
+
+def rename(old_key: str, new_key: str) -> Callable[[MutableMapping], None]:
+    """
+    Rename a given field in the document.
+
+    The value of ``old_key`` is moved to ``new_key`` and ``old_key`` is
+    removed. If the document does not contain ``old_key``, it is left
+    untouched. If it already contains ``new_key``, its value is overwritten.
+    Only top-level keys are supported, so a ``new_key`` containing dots is
+    stored literally.
+    """
+    def transform(doc: MutableMapping):
+        if old_key in doc:
+            value = doc[old_key]
+            del doc[old_key]
+            doc[new_key] = value
+
+    return transform
