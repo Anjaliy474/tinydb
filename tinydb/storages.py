@@ -8,9 +8,66 @@ import json
 import os
 import warnings
 from abc import ABC, abstractmethod
+from datetime import date, datetime
 from typing import Any, Optional
 
 __all__ = ('Storage', 'JSONStorage', 'MemoryStorage')
+
+# Tag keys used to encode ``datetime``/``date`` values in the JSON file. The
+# tag makes the on-disk form distinguishable from an ordinary string, so no
+# already-stored string is ever reinterpreted when reading a database.
+_DATETIME_TAG = '__tinydb_datetime__'
+_DATE_TAG = '__tinydb_date__'
+
+
+def _encode_value(obj: Any):
+    """
+    ``json.dumps`` ``default`` hook that encodes ``datetime`` and ``date``
+    values in the tagged form.
+
+    All other types raise :exc:`TypeError`, just like the default encoder.
+
+    :param obj: The value that ``json`` cannot encode.
+    """
+    if isinstance(obj, datetime):
+        return {_DATETIME_TAG: obj.isoformat()}
+
+    if isinstance(obj, date):
+        return {_DATE_TAG: obj.isoformat()}
+
+    raise TypeError(
+        f'Object of type {type(obj).__name__} is not JSON serializable'
+    )
+
+
+def _decode_value(obj: dict[str, Any]):
+    """
+    ``json.load`` ``object_hook`` that decodes the tagged form back into
+    ``datetime``/``date`` objects.
+
+    Dicts that don't carry exactly one of the tags with a parseable string
+    value are returned unchanged, so foreign or malformed data never makes
+    reading a database fail.
+
+    :param obj: The decoded JSON object.
+    """
+    if len(obj) == 1:
+        if _DATETIME_TAG in obj:
+            value = obj[_DATETIME_TAG]
+            try:
+                if isinstance(value, str):
+                    return datetime.fromisoformat(value)
+            except ValueError:
+                pass
+        elif _DATE_TAG in obj:
+            value = obj[_DATE_TAG]
+            try:
+                if isinstance(value, str):
+                    return date.fromisoformat(value)
+            except ValueError:
+                pass
+
+    return obj
 
 
 def touch(path: str, create_dirs: bool):
@@ -79,6 +136,12 @@ class Storage(ABC):
 class JSONStorage(Storage):
     """
     Store the data in a JSON file.
+
+    ``datetime`` and ``date`` values are stored in a tagged form
+    (``{"__tinydb_datetime__": ...}``) and are read back as
+    ``datetime``/``date`` objects. All other values are stored and read back
+    unchanged; in particular, strings that merely look like a date are never
+    converted.
     """
 
     def __init__(self, path: str, create_dirs=False, encoding=None, access_mode='r+', **kwargs):
@@ -137,14 +200,21 @@ class JSONStorage(Storage):
             self._handle.seek(0)
 
             # Load the JSON contents of the file
-            return json.load(self._handle)
+            return json.load(self._handle, object_hook=_decode_value)
 
     def write(self, data: dict[str, dict[str, Any]]):
         # Move the cursor to the beginning of the file just in case
         self._handle.seek(0)
 
         # Serialize the database state using the user-provided arguments
-        serialized = json.dumps(data, **self.kwargs)
+        kwargs = dict(self.kwargs)
+
+        # Only add our own encoder if the user hasn't supplied one, so custom
+        # ``default``/``cls`` arguments keep working as before
+        if 'default' not in kwargs and 'cls' not in kwargs:
+            kwargs['default'] = _encode_value
+
+        serialized = json.dumps(data, **kwargs)
 
         # Write the serialized data to the file
         try:

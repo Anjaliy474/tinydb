@@ -2,6 +2,7 @@ import json
 import os
 import random
 import tempfile
+from datetime import date, datetime
 
 import pytest
 
@@ -285,3 +286,127 @@ def test_json_invalid_mode_warning(tmpdir):
     path = str(tmpdir.join('test.db'))
     with pytest.warns(UserWarning, match='Using an `access_mode` other than'):
         JSONStorage(path, access_mode='w')
+
+
+def test_json_datetime_roundtrip_ac1(tmpdir):
+    path = str(tmpdir.join('test.db'))
+    now = datetime(2024, 5, 17, 12, 30, 45, 123456)
+
+    db = TinyDB(path)
+    db.insert({'created': now})  # must not raise TypeError
+    db.close()
+
+    db = TinyDB(path)
+    created = db.get(where('created') == now)['created']
+    assert created == now
+    assert type(created) is datetime
+    db.close()
+
+
+def test_json_datetime_nested_ac2(tmpdir):
+    path = str(tmpdir.join('test.db'))
+    now = datetime(2024, 5, 17, 12, 30, 45)
+    document = {'events': [{'at': now}], 'nested': {'at': now}}
+
+    db = TinyDB(path)
+    db.insert(document)
+    db.close()
+
+    db = TinyDB(path)
+    assert db.all() == [document]
+    assert type(db.all()[0]['events'][0]['at']) is datetime
+    assert type(db.all()[0]['nested']['at']) is datetime
+    db.close()
+
+
+def test_json_date_roundtrip_ac3(tmpdir):
+    path = str(tmpdir.join('test.db'))
+    d = date(2024, 5, 17)
+
+    db = TinyDB(path)
+    db.insert({'day': d})
+    db.close()
+
+    db = TinyDB(path)
+    day = db.all()[0]['day']
+    assert day == d
+    assert type(day) is date
+    db.close()
+
+
+def test_json_plain_values_unchanged_ac4(tmpdir):
+    path = str(tmpdir.join('test.db'))
+    document = {
+        'name': '2024-05-17T12:30:45',
+        'n': 42,
+        'ok': True,
+        'none': None,
+        'items': [1, 'x'],
+        'sub': {'k': 'v'},
+    }
+
+    db = TinyDB(path)
+    db.insert(document)
+    db.close()
+
+    db = TinyDB(path)
+    assert db.all() == [document]
+    assert type(db.all()[0]['name']) is str
+    db.close()
+
+
+def test_json_unsupported_type_still_raises(tmpdir):
+    path = str(tmpdir.join('test.db'))
+    storage = JSONStorage(path)
+
+    with pytest.raises(TypeError):
+        storage.write({'1': {'items': {1, 2, 3}}})
+
+    storage.close()
+
+
+def test_json_kwargs_not_mutated(tmpdir):
+    path = str(tmpdir.join('test.db'))
+    storage = JSONStorage(path, sort_keys=True)
+
+    storage.write({'1': {'when': datetime(2024, 5, 17, 12, 30, 45)}})
+
+    assert storage.kwargs == {'sort_keys': True}
+    assert isinstance(storage.read()['1']['when'], datetime)
+
+    storage.close()
+
+
+def test_json_datetime_custom_default(tmpdir):
+    """
+    A user-supplied ``default`` is still honoured (and other ``**kwargs`` keep
+    formatting the file) even when the data contains dates.
+    """
+    path = str(tmpdir.join('test.db'))
+
+    def default(obj):
+        return 'custom'
+
+    storage = JSONStorage(path, default=default, sort_keys=True, indent=4,
+                          separators=(',', ': '))
+    storage.write({'1': {'when': datetime(2024, 5, 17, 12, 30, 45)}})
+    storage.close()
+
+    with open(path) as handle:
+        content = handle.read()
+
+    assert content == json.dumps({'1': {'when': 'custom'}}, sort_keys=True,
+                                 indent=4, separators=(',', ': '))
+    assert '__tinydb_datetime__' not in content
+    assert storage.kwargs['default'] is default
+
+
+def test_in_memory_datetime_untouched_ac6():
+    now = datetime(2024, 5, 17, 12, 30, 45)
+
+    db = TinyDB(storage=MemoryStorage)
+    db.insert({'created': now})
+
+    assert db.all() == [{'created': now}]
+    assert db.all()[0]['created'] is now
+    db.close()
