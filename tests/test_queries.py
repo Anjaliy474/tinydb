@@ -527,3 +527,13 @@ def test_get_item():
 
     assert query({'test': 1})
     assert not query({'test': 0})
+
+
+def test_fragment_on_two_fields_seeded():
+    from tinydb import TinyDB
+    from tinydb.storages import MemoryStorage
+    db = TinyDB(storage=MemoryStorage)
+    db.insert_multiple([{'home': {'c': 'P'}, 'work': {'c': 'H'}}, {'home': {'c': 'H'}, 'work': {'c': 'P'}}])
+    q = Query()
+    assert [d.doc_id for d in db.search(q.home.fragment({'c': 'P'}))] == [1]
+    assert [d.doc_id for d in db.search(q.work.fragment({'c': 'P'}))] == [2]
