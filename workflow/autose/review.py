@@ -8,13 +8,14 @@ approval belongs to a person anyway).
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 
 from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
-from .llm import Agent, AgentError, make_agent
+from .llm import AgentError, make_agent
 from .tools import Workspace, reviewer_tools
 
 MAX_DIFF = 40_000
@@ -64,7 +65,11 @@ def main() -> int:
     diff = ws.git_diff()
     if len(diff) > MAX_DIFF:
         diff = diff[:MAX_DIFF] + "\n[... diff cut, use git_diff or read_file for the rest ...]"
-    agent = make_agent(model=model, system=cfg.prompt("reviewer"), tools=reviewer_tools(ws),
+    # AUTOSE_REVIEWER_PROMPT picks the prompt variant for the experiments (intake checks it).
+    prompt_name = os.environ.get("AUTOSE_REVIEWER_PROMPT") or "reviewer"
+    if prompt_name not in ("reviewer", "reviewer_plain"):
+        prompt_name = "reviewer"
+    agent = make_agent(model=model, system=cfg.prompt(prompt_name), tools=reviewer_tools(ws),
                   budget=budget, max_turns=conf.limit("reviewer_turns"), effort="high")
     try:
         agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) +
@@ -72,7 +77,7 @@ def main() -> int:
         review = ws.submitted["review"]
         ran_tests = any(e.get("tool") == "run_tests" and not e.get("error") for e in agent.log)
         result = gates.gate_review(review, args.round, ran_tests)
-        md, comment = render(review, args.round, model)
+        md, comment = render(review, args.round, f"{model}, {prompt_name} prompt")
         (out / "review.md").write_text(md, encoding="utf-8")
         if not result.passed:
             gates.add_diagnostics(out / "review.md", result)
