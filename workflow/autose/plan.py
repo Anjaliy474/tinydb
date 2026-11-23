@@ -11,7 +11,8 @@ from pathlib import Path
 from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
-from .llm import AgentError, make_agent, ask_json_any as ask_json
+from .llm import (AgentError, ModelUnavailable, ask_json_any as ask_json, make_agent,
+                  run_with_fallback)
 from .tools import Workspace, planner_tools
 
 
@@ -32,7 +33,12 @@ def ws_files(conf) -> list[str]:
 
 
 def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
-    agent = make_agent(model=conf.model("planner"), system=cfg.prompt("planner_spec"),
+    return run_with_fallback(conf.models("planner"),
+                             lambda m: _run_spec(conf, ws, budget, issue, client, m), "planner")
+
+
+def _run_spec(conf, ws, budget, issue: dict, client, model: str) -> gates.GateResult:
+    agent = make_agent(model=model, system=cfg.prompt("planner_spec"),
                   tools=planner_tools(ws, "spec.md"), budget=budget,
                   max_turns=conf.limit("planner_turns"), client=client)
     agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) + "\n\n" +
@@ -41,17 +47,29 @@ def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
 
     def judge(criteria):
         listing = "\n".join(f"{k}: {v}" for k, v in criteria.items())
-        return ask_json(model=conf.model("judge"), system=cfg.prompt("judge"),
-                        user=f"Repository: TinyDB (Python).\n\nCriteria:\n{listing}",
-                        schema=gates.JUDGE_SCHEMA, budget=budget, client=client)
+
+        def ask(judge_model):
+            return ask_json(model=judge_model, system=cfg.prompt("judge"),
+                            user=f"Repository: TinyDB (Python).\n\nCriteria:\n{listing}",
+                            schema=gates.JUDGE_SCHEMA, budget=budget, client=client)
+        try:
+            return run_with_fallback(conf.models("judge"), ask, "judge")
+        except ModelUnavailable as exc:  # a judge problem must not switch the planner's model
+            raise AgentError(f"testability check unavailable: {exc}") from exc
 
     return check_with_revision(conf, agent, ws, "spec.md",
                                lambda text: gates.gate_spec(text, judge))
 
 
 def run_design(conf, ws, budget, spec: str, reason: str = "", client=None) -> gates.GateResult:
+    return run_with_fallback(conf.models("planner"),
+                             lambda m: _run_design(conf, ws, budget, spec, reason, client, m),
+                             "planner")
+
+
+def _run_design(conf, ws, budget, spec: str, reason: str, client, model: str) -> gates.GateResult:
     allowed = ", ".join(conf.allowed_paths)
-    agent = make_agent(model=conf.model("planner"),
+    agent = make_agent(model=model,
                   system=cfg.prompt("planner_design", allowed_paths=allowed),
                   tools=planner_tools(ws, "design.md"), budget=budget,
                   max_turns=conf.limit("planner_turns"), client=client)

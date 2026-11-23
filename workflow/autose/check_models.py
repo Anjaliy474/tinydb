@@ -19,7 +19,7 @@ def main() -> int:
             print(f"  {model.name.removeprefix('models/')}")
     conf = cfg.load()
     ok = True
-    to_try = list(conf["models"].items())
+    to_try = [(role, m) for role in conf["models"] for m in conf.models(role)]
     extra = [m.strip() for m in os.environ.get("EXTRA_MODELS", "").split(",") if m.strip()]
     to_try += [("extra", m) for m in extra]
     print("\nTrying the configured models (and any extra ones given):")

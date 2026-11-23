@@ -34,11 +34,13 @@ architecture_doc: ARCHITECTURE.md
 # per model. Check what your key can use with the "AutoSE check models" workflow.
 # The Claude setup from ADR-006 still works: put claude-* model names here and add
 # ANTHROPIC_API_KEY.
+# Each role lists models in order; when one is out of daily quota or overloaded, the next is
+# used. The reviewer skips whichever model built the change.
 models:
-  planner: gemini-3.5-flash-lite
-  judge: gemini-3.5-flash-lite
-  builder: gemini-3.5-flash
-  reviewer: gemini-3.6-flash
+  planner: [gemini-3.5-flash-lite, gemini-3.6-flash, gemini-3.5-flash]
+  judge: [gemini-3.5-flash-lite, gemini-3.5-flash]
+  builder: [gemini-3.5-flash, gemini-3.6-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-3.5-flash-lite]
+  reviewer: [gemini-3.6-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-3.5-flash]
 
 # Hard caps (ADR-009). Dollars are estimated from token usage and the price table in
 # budget.py (free-tier Gemini counts as $0, so the token caps do the work there).

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .budget import Budget
-from .llm import MAX_TOOL_OUTPUT, AgentError, Tool, _short
+from .llm import MAX_TOOL_OUTPUT, AgentError, ModelUnavailable, QuotaExhausted, Tool, _short
 
 MAX_WAIT_S = 600       # give up on one call after waiting this long in total
 REQUEST_TIMEOUT_MS = 120_000
@@ -39,11 +39,6 @@ def _schema(tool: Tool) -> dict:
     schema.setdefault("type", "object")
     schema.setdefault("required", list(schema.get("properties", {})))
     return schema
-
-
-class QuotaExhausted(AgentError):
-    """The free daily quota for a model is used up. Waiting won't help until it resets
-    (midnight Pacific time), so the stage stops at once and says so."""
 
 
 # Spacing between calls, so a burst of tool calls doesn't run into the per-minute limit.
@@ -97,8 +92,14 @@ def call_with_retry(fn, *args, sleep=time.sleep, **kwargs):
                 code = "timeout"
             delay = min(_retry_delay(exc) if code == 429 else 15.0 * (attempt + 1),
                         MAX_WAIT_S - waited)
-            if (code not in TEMPORARY and code != "timeout") or attempt == RETRIES - 1 or delay <= 0:
+            if code == 404:
+                raise ModelUnavailable(f"{model} is not offered to this key (404)") from exc
+            if code in TEMPORARY and (attempt == RETRIES - 1 or delay <= 0):
+                raise ModelUnavailable(f"{model} kept failing ({code}) after {attempt + 1} tries") from exc
+            if code not in TEMPORARY and code != "timeout":
                 raise AgentError(f"Gemini API error from {model} ({code}): {str(exc)[:300]}") from exc
+            if code == "timeout" and attempt == RETRIES - 1:
+                raise ModelUnavailable(f"{model} timed out {RETRIES} times") from exc
             print(f"[gemini] {model}: {code}, waiting {delay:.0f}s (attempt {attempt + 1})", flush=True)
             sleep(delay)
             waited += delay

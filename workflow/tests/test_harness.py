@@ -618,3 +618,85 @@ def test_gemini_server_errors_retry_then_end_cleanly(monkeypatch):
 
     with pytest.raises(KeyError):  # real bugs are not hidden
         llm_gemini.call_with_retry(bug, model="m-bug", sleep=sleeps.append)
+
+
+
+# --- model fallback (ADR-011, after run 45175052013 ran out of daily quota) -------------------
+
+def test_config_model_lists(conf, monkeypatch):
+    assert conf.models("builder")[0] == conf.model("builder")
+    assert len(conf.models("builder")) > 1
+    monkeypatch.setenv("AUTOSE_REVIEWER_MODEL", "gemini-x")
+    assert conf.models("reviewer") == ["gemini-x"]
+
+
+def test_run_with_fallback_moves_on_only_for_unavailable_models():
+    from autose.llm import AgentError, ModelUnavailable, QuotaExhausted, run_with_fallback
+    tried = []
+
+    def attempt(model):
+        tried.append(model)
+        if model == "a":
+            raise QuotaExhausted("daily quota")
+        if model == "b":
+            raise ModelUnavailable("overloaded")
+        return model
+
+    assert run_with_fallback(["a", "b", "c"], attempt, "t") == "c" and tried == ["a", "b", "c"]
+    with pytest.raises(ModelUnavailable):
+        run_with_fallback(["a", "b"], attempt, "t")
+
+    def broken(model):
+        raise AgentError("real failure")
+
+    with pytest.raises(AgentError, match="real failure"):  # not a model problem: no fallback
+        run_with_fallback(["x", "y"], broken, "t")
+
+
+def test_reviewer_skips_the_builders_model():
+    from autose.review import reviewer_models
+    assert reviewer_models(["m1", "m2"], "m1") == ["m2"]
+    assert reviewer_models(["m1"], "m1") == ["m1"]
+    assert reviewer_models(["m1", "m2"], "") == ["m1", "m2"]
+
+
+def test_build_switches_model_when_quota_runs_out(sandbox, tmp_path):
+    from autose.llm import QuotaExhausted
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "spec.md").write_text(GOOD_SPEC)
+    (out / "design.md").write_text(GOOD_DESIGN)
+    made = []
+
+    class OutOfQuota:
+        def send(self, message):
+            raise QuotaExhausted("daily quota used up")
+
+    def make(ws):
+        made.append(ws)
+        if len(made) == 1:
+            return OutOfQuota()
+        return ScriptedAgent(ws, [lambda w: (apply_fix(w), submit(w, ok=True))])
+
+    code = build.run(sandbox, out, 1, budget=Budget(1.0, 10**6, "t"), make_builder=make)
+    report = (out / "test_report.md").read_text()
+    assert code == 0, report
+    assert "switching to" in report and len(made) == 2
+
+
+def test_build_stops_at_once_when_every_model_is_out(sandbox, tmp_path, monkeypatch):
+    from autose.llm import QuotaExhausted
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "spec.md").write_text(GOOD_SPEC)
+    (out / "design.md").write_text(GOOD_DESIGN)
+    monkeypatch.setenv("AUTOSE_BUILDER_MODEL", "only-one")
+    monkeypatch.setattr(build, "run_design", lambda *a, **k: pytest.fail("no design revision"))
+
+    class OutOfQuota:
+        def send(self, message):
+            raise QuotaExhausted("daily quota used up")
+
+    code = build.run(sandbox, out, 1, budget=Budget(1.0, 10**6, "t"),
+                     make_builder=lambda ws: OutOfQuota())
+    assert code == 1 and "no builder model available" in (out / "test_report.md").read_text()
