@@ -1,35 +1,27 @@
-# Demo video script (about 5 minutes)
+# Demo video script (about 4:30, limit 5:00)
 
-Record the screen with your voice. Use a run you start live, or replay a finished one (issue #2,
-run 45186252584, took about 6 minutes, so a live run fits if you talk over the waiting).
+Plain spoken English, first person. Scenes 6-9 are the one complete run the assignment asks for:
+issue #2, run 45186252584, PR #19, from the issue page to the posted review.
 
-**0:00 - 0:30 The idea.** Open the repo README. "A maintainer labels an issue, agents turn it into a
-tested, reviewed PR, and a person decides whether to merge. Most of the work is in the design, so
-I'll show a run and then why it's built this way."
+| # | On screen | Voice-over |
+|---|---|---|
+| 1 | Title, repo link | Hi. This is my Assignment 3 for AutoSE. The task was to build a GitHub Actions workflow where agents take a GitHub issue and turn it into a tested and reviewed pull request. A maintainer only adds a label or a comment. A person still decides whether to merge. I did this on a fork of TinyDB, pinned to commit edff96a. |
+| 2 | Stage table: the six stages, artifact and check | The assignment fixes six stages. Requirements writes spec.md. Design writes design.md. Implementation changes the code. Testing runs the old and new tests. Release opens the pull request and runs CI. Review is done by a separate agent. Each stage saves a file, and the next stage starts only if a check passes. |
+| 3 | Component diagram | I used three agents. The Planner does requirements and design. The Builder does implementation and testing. The Reviewer does the review. Release and CI are plain scripts with no model. The pass or fail decision is made by normal code in gates.py, not by the agent. This is a fixed pipeline, so every run ends in a known number of steps. |
+| 4 | How work is passed + reviewer independence | The agents pass only small files to each other, not their conversations. The Reviewer runs in its own job. It sees only the issue, the diff and the code. It never sees the spec or the Builder's notes, and it cannot push or merge. It has to run the tests, and every problem it reports needs a file and a line. |
+| 5 | Permissions, triggers, safety | Each job gets only the GitHub permissions it needs. Only the release job can push. Only a maintainer can start a run, and two runs on the same issue wait for each other. Issue text is treated as untrusted. It never goes into a shell command, and secrets are removed before any test runs. Every stage has limits on turns, tokens, cost and time. |
+| 6 | Issue #2 page | Now one complete run. Issue 2 is a bug: remove crashes when the same id is passed twice. I start the workflow by commenting slash autose. |
+| 7 | Actions run page + job times + artifacts | The whole run took about six minutes. The Planner's first spec failed the check, so it got one chance to fix it, and then it passed with six testable criteria. The design named the exact functions to change. The Builder fixed update and remove, added six tests, and all 239 tests passed. All the files from each stage are saved with the run. |
+| 8 | PR #19 + CI | The release job opened pull request 19 and ran CI on it. The description shows each acceptance criterion and the test that checks it. |
+| 9 | Review comment on PR #19 | This is the review. The Reviewer read the code, ran the tests and tried some edge cases itself, and then approved. The pull request is now waiting for me to decide. |
+| 10 | Results table + pass-rate chart | I opened five issues: two bugs, two features and one vague one. For each, I wrote hidden tests that the agents never saw. All five got a pull request that passed review and passed all sixteen hidden tests. In total I made fourteen full runs. They used about 5.9 million tokens and cost about 85 cents. |
+| 11 | Seeded PR #27 review + experiment table | To check the Reviewer, I made five pull requests myself. Four had a bug I planted, and one was correct. The Reviewer caught all four bugs and approved the correct one. I also tested two decisions: a stronger model for the Reviewer, and a plain prompt instead of a strict one. The verdicts did not change. The strict prompt made it check more carefully, and only the stronger model saw that one bug was a design problem. |
+| 12 | Model timeline + ADR list | I wrote thirteen ADRs. Three decisions changed after real runs. I planned to use Claude but had no paid access. I moved to the Gemini free tier, but it kept running out of quota, so I moved to DeepSeek. I kept the old ADRs and marked them superseded. If I started again, I would check model access first. |
+| 13 | Limitations + repo layout | There are limits. The sample is small, I wrote the tests myself, and round two of the review never happened, because every pull request was approved the first time. Everything is in the repository: the report, the ADRs, the workflow code, the experiments and all the run links. Thank you. |
 
-**0:30 - 1:00 The issue.** Open an issue (for a live run, a new small one, or #2). Point at how short
-and informal it is. Add the `autose` label (or comment `/autose`).
-
-**1:00 - 2:00 The run.** Open the Actions tab. Show the job graph: intake, planner, builder, release,
-CI, review, finalize. Click the planner job and show the live log lines (`[deepseek] ... turn 3`,
-"Stage 1 passed"). Say: each stage is its own job with only the permissions it needs; only the
-release job can push.
-
-**2:00 - 2:45 The artifacts.** On the run page, open the artifacts: `spec.md` (Given/When/Then
-criteria), `design.md` (files and functions), `test_report.md` (each criterion mapped to a test).
-Say: plain code checks each of these before the next stage starts; the agents never mark their own
-work as done.
-
-**2:45 - 3:45 The PR and the review.** Open the PR: the fix, the new tests, the `autose/ci` check.
-Open the review comment: verdict, the four checks, the probes it ran. Say: the reviewer runs in its
-own job, sees only the issue, the diff and the code, never the spec or the builder's notes, and it
-can't approve or merge.
-
-**3:45 - 4:30 What the reviewer catches.** Open seeded PR #27 (rename that crashes). Show the review
-that found the crash with its own probe. Mention: on five seeded PRs it caught all four planted bugs
-and approved the clean one, with every setup I tried.
-
-**4:30 - 5:00 What I learned.** Show the ADR list: 13 decisions, three superseded or changed by real
-runs (models twice, and the planner's one revision). "The design didn't change; the model behind it
-did, twice, and every failed run fixed something in the harness." End on the PR waiting for a
-person.
+## Links used
+- Repo: https://github.com/Anjaliy474/tinydb
+- Issue #2: https://github.com/Anjaliy474/tinydb/issues/2
+- Run: https://github.com/Anjaliy474/tinydb/actions/runs/45186252584
+- PR #19: https://github.com/Anjaliy474/tinydb/pull/19
+- Seeded PR #27: https://github.com/Anjaliy474/tinydb/pull/27
