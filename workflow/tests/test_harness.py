@@ -777,3 +777,17 @@ def test_openai_agent_loop_retry_and_balance(monkeypatch):
 def test_deepseek_key_is_stripped_from_test_runs(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
     assert "DEEPSEEK_API_KEY" not in tools.clean_env()
+
+
+
+def test_agent_logs_are_saved(tmp_path):
+    from autose import llm
+    llm.CREATED_AGENTS.clear()
+    client = FakeClient([reply(tool_use("done", {"ok": True}))])
+    llm.make_agent(model="claude-sonnet-5-5", system="s", budget=Budget(1, 10**6, "t"), max_turns=3,
+                   client=client, tools=[Tool("done", "finish", {"properties": {"ok": {"type": "boolean"}}},
+                                              lambda ok: "ok", stops=True)]).send("go")
+    llm.save_agent_logs(tmp_path, "build-r1")
+    saved = json.loads((tmp_path / "build-r1_agent_log.json").read_text())
+    assert saved[0]["model"] == "claude-sonnet-5-5" and saved[0]["log"][0]["tool"] == "done"
+    llm.CREATED_AGENTS.clear()

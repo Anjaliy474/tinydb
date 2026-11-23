@@ -15,7 +15,7 @@ import sys
 from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
-from .llm import AgentError, make_agent, run_with_fallback
+from .llm import AgentError, make_agent, run_with_fallback, save_agent_logs
 from .tools import Workspace, reviewer_tools
 
 MAX_DIFF = 40_000
@@ -110,6 +110,7 @@ def main() -> int:
         return 1
     finally:
         budget.save(out)
+        save_agent_logs(out, f"review-r{args.round}")
 
 
 if __name__ == "__main__":

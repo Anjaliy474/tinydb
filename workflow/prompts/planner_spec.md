@@ -61,3 +61,7 @@ status: ok            # or: blocked
 ```
 
 Then stop. Keep it short.
+
+## Working efficiently
+
+You have a limited number of turns. When you need several files or several pieces of information, ask for them in the same turn (you can call several tools at once). Read a file once, in large ranges, rather than a few lines at a time, and don't read the same thing twice.

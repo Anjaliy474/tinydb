@@ -17,7 +17,7 @@ from typing import Callable, Optional
 from . import config as cfg
 from . import gates
 from .budget import Budget, BudgetExceeded
-from .llm import Agent, AgentError, ModelUnavailable, make_agent
+from .llm import Agent, AgentError, ModelUnavailable, make_agent, save_agent_logs
 from .plan import run_design
 from .tools import Workspace, builder_tools, tail
 
@@ -151,6 +151,7 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
         return finish(out, round_no, criteria, None, history, str(exc))
     finally:
         budget.save(out)
+        save_agent_logs(out, f"build-r{round_no}")
         # The reviewer job uses this to stay off the builder's model (ADR-008, ADR-011).
         set_output(builder_model=models[current["index"]])
 

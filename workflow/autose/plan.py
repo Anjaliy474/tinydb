@@ -12,7 +12,7 @@ from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
 from .llm import (AgentError, ModelUnavailable, ask_json_any as ask_json, make_agent,
-                  run_with_fallback)
+                  run_with_fallback, save_agent_logs)
 from .tools import Workspace, planner_tools
 
 
@@ -132,6 +132,7 @@ def main() -> int:
         return fail(out / name, gates.GateResult(False, [str(exc)]), "Planner")
     finally:
         budget.save(out)
+        save_agent_logs(out, "plan")
 
 
 def fail(path: Path, result: gates.GateResult, stage: str) -> int:
