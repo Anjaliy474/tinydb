@@ -242,6 +242,59 @@ def test_remove_ids_mixed(db: TinyDB):
     assert db.get(doc_id=2) is not None
 
 
+def test_remove_ids_duplicates():
+    # A doc_id that occurs more than once in ``doc_ids`` must be removed only
+    # once (no ``KeyError``) and appear only once in the returned list.
+    db = TinyDB(storage=MemoryStorage)
+    db.insert({'name': 'a'})
+    db.insert({'name': 'b'})
+
+    assert db.remove(doc_ids=[2, 2]) == [2]
+    assert db.all() == [{'name': 'a'}]
+
+
+def test_remove_ids_duplicates_order(db: TinyDB):
+    # Duplicates are collapsed, keeping the order of the first occurrence; a
+    # missing ID in between is still skipped.
+    assert db.remove(doc_ids=[3, 1, 3, 99]) == [3, 1]
+    assert len(db) == 1
+    assert db.all()[0].doc_id == 2
+
+
+def test_update_ids_duplicates(db: TinyDB):
+    # The callable form must only be applied once per unique doc_id.
+    from tinydb.operations import increment
+
+    db.drop_tables()
+    doc_id = db.insert({'views': 0})
+
+    assert db.update(increment('views'), doc_ids=[doc_id, doc_id]) == [doc_id]
+    assert db.get(doc_id=doc_id)['views'] == 1
+
+
+def test_update_ids_duplicates_dict(db: TinyDB):
+    # The dict form must also update each document only once and report the
+    # ID only once.
+    assert db.update({'int': 9}, doc_ids=[1, 1]) == [1]
+    assert db.count(where('int') == 9) == 1
+    assert db.count(where('int') == 1) == 2
+
+
+def test_remove_and_update_ids_duplicates_missing(db: TinyDB):
+    # Duplicated non-existent IDs are still silently skipped.
+    assert db.remove(doc_ids=[99, 99]) == []
+    assert db.update({'int': 9}, doc_ids=[99, 99]) == []
+    assert len(db) == 3
+    assert db.count(where('int') == 1) == 3
+
+
+def test_update_ids_no_duplicates(db: TinyDB):
+    # A duplicate-free ``doc_ids`` list behaves exactly as before.
+    assert db.update({'int': 2}, doc_ids=[1, 2]) == [1, 2]
+    assert len(db) == 3
+    assert db.count(where('int') == 2) == 2
+
+
 def test_update(db: TinyDB):
     assert len(db) == 3
 
