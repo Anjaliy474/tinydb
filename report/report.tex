@@ -46,25 +46,25 @@
 \vspace{-0.8cm}
 
 \section*{Overview}
-This report describes a GitHub Actions workflow that turns an issue into a tested and reviewed pull
-request. A maintainer starts it by adding the label \code{autose} to an issue or by commenting
+For this assignment I built a GitHub Actions workflow that turns an issue into a tested and reviewed
+pull request. A maintainer starts it by adding the label \code{autose} to an issue or by commenting
 \code{/autose}. The workflow then writes a specification, plans the change, edits the code, tests it,
-opens a pull request, runs CI and has the pull request reviewed by a separate agent. The workflow never
-merges; a person makes that decision.
+opens a pull request, runs CI and has the pull request reviewed by a separate agent. It never merges
+anything; that decision stays with a person.
 
-The agents ran on two model providers. The first runs used the Google Gemini free tier. Because the
-free tier repeatedly ran out of quota, the workflow was moved to the DeepSeek API, which was used for
-all later runs and for both experiments. Section~2 explains this change.
+The agents ran on two model providers. I started on the Google Gemini free tier. Because the free tier
+kept running out of quota, I moved the workflow to the DeepSeek API and used it for all later runs and
+for both experiments. Section~2 explains why.
 
 %==================================================================================================
 \section{Architecture}
 
-The work is divided between three agents and three plain scripts. The \textbf{Planner} handles
+I divided the work between three agents and three plain scripts. The \textbf{Planner} handles
 Stages~1 and~2, the \textbf{Builder} handles Stages~3 and~4, a \textbf{release script} handles
 Stage~5, and an \textbf{independent Reviewer} handles Stage~6. An \textbf{intake} step decides whether
 an event may start a run, and a \textbf{finalize} step records how many review rounds have been used.
 Each stage runs in its own Actions job with only the GitHub permissions it needs. Whether a stage has
-passed is decided by ordinary code in \code{gates.py}, not by the agent that did the work.
+passed is decided by ordinary code in \code{gates.py}, never by the agent that did the work.
 
 \begin{figure}[h]
 \centering
@@ -124,12 +124,12 @@ token limit, a cost limit and a job timeout. Each job checks out the workflow co
 into a separate folder from the code being changed, so a pull request cannot change the rules it is
 checked against.
 
-\textbf{Models.} The first five runs used the Gemini free tier: \code{gemini-3.5-flash-lite} for
+\textbf{Models.} My first five runs used the Gemini free tier: \code{gemini-3.5-flash-lite} for
 planning, and \code{gemini-3.5-flash} and \code{gemini-3.6-flash} for building and reviewing, with other
-Gemini models as fallbacks when one ran out of quota. All later runs used DeepSeek:
+Gemini models as fallbacks when one ran out of quota. All my later runs used DeepSeek:
 \code{deepseek-flash} (DeepSeek V4.1 Flash) for the Planner and Builder and, at first,
-\code{deepseek-v4-pro} (DeepSeek V4 Pro) for the Reviewer. In the final setup every role uses
-\code{deepseek-flash}; V4 Pro was used again only in experiment~A.
+\code{deepseek-v4-pro} (DeepSeek V4 Pro) for the Reviewer. In the end I put every role
+on \code{deepseek-flash} to keep it simple and cheap, and used V4 Pro again only in experiment~A.
 
 \begin{figure}[h]
 \centering
@@ -163,10 +163,10 @@ numbers per stage is in \code{architecture/views/sequence-view.md}.}
 %==================================================================================================
 \section{Design Decisions}
 
-Thirteen architecture decision records (ADRs) in the Nygard format are kept in
-\code{architecture/decisions/}. ADR-001 to ADR-010 were committed before any agent code was written.
-ADR-011 to ADR-013 were added when real runs showed that an earlier decision was wrong; the earlier
-ADRs were kept and marked as superseded.
+I wrote thirteen architecture decision records (ADRs) in the Nygard format; they are in
+\code{architecture/decisions/}. I committed ADR-001 to ADR-010 before writing any agent code. I added
+ADR-011 to ADR-013 later, when real runs showed me that an earlier decision was wrong, and I kept the
+old ADRs and marked them as superseded.
 
 \begin{table}[h]
 \centering\scriptsize
@@ -198,17 +198,17 @@ ADR & Decision & Option chosen & Main option rejected & Main reason & Status \\
 \textbf{Plain code decides, not the agents (ADR-007, revised by ADR-012).} A stage hands over only when
 \code{gates.py} says it has passed. The design check parses the plan and confirms that every function
 it names exists in the code. The test check runs the full suite and confirms that each acceptance
-criterion maps to a new test that passed. These checks caught real mistakes: a criterion stating that an
+criterion maps to a new test that passed. In my runs these checks caught real mistakes: a criterion stating that an
 existing test ``continues to function correctly'' was rejected as untestable, and a Builder that mapped a
-criterion to a test that did not exist was sent back. The checks also exposed bugs in the harness first,
-such as a parser that read only the first line of a criterion written over two lines. For this reason
-the gates were kept small and covered by unit tests (38 in total). The one rule that changed was halting
-on the first failure. Run 45172879048 stopped after one minute because of one vague sentence that the
-checker had already explained. ADR-012 therefore gives the Planner exactly one revision using the
+criterion to a test that did not exist was sent back. They also showed me my own bugs first,
+such as a parser that read only the first line of a criterion written over two lines, so I kept the
+gates small and covered them with unit tests (38 in total). The one rule I changed was halting on the
+first failure. Run 45172879048 stopped after one minute because of one vague sentence that the
+checker had already explained. So in ADR-012 I gave the Planner exactly one revision using the
 checker's reasons. In the run in Figure~\ref{fig:sequence}, this revision is what let Stage~1 pass.
 
-\textbf{Reviewer independence through structure (ADR-008, ADR-003).} Independence does not depend on
-the prompt. The Reviewer runs in its own job with a read-only checkout of the pull request and never
+\textbf{Reviewer independence through structure (ADR-008, ADR-003).} I did not want independence to
+depend on the prompt, so I built it into the structure. The Reviewer runs in its own job with a read-only checkout of the pull request and never
 downloads the specification, the design or any notes from the other agents. It receives what a human
 reviewer would receive: the issue, the diff and the code, and it may run the tests and its own short
 Python probes. An approval must be supported by evidence: the gate rejects a review that did not run the
@@ -217,12 +217,12 @@ GitHub does not allow a bot to approve its own pull request, so the Reviewer pos
 verdict, and only a person can approve and merge. Because the Reviewer reads the issue rather than the
 specification, it judges what the user asked for, not the Planner's interpretation of it.
 
-\textbf{The model decision, made three times (ADR-006, 011, 013).} The workflow was designed for Claude,
-but there was no paid API access. It was moved to the Gemini free tier, which required new handling:
+\textbf{The model decision, made three times (ADR-006, 011, 013).} I designed the workflow for Claude,
+but then found I had no paid API access. I moved it to the Gemini free tier, which needed new handling:
 waiting for the delay the server requests, stopping at once when the daily quota is used up, and a list
-of fallback models for each role. Each of the five Gemini runs on issue \#3 exposed something to fix,
+of fallback models for each role. Each of my five Gemini runs on issue \#3 showed me something to fix,
 but four of them failed on overload or quota, and the one that finished spent about 45 minutes in the
-Builder. After the move to DeepSeek, the same pipeline completed an issue in about six minutes for
+Builder. After I moved to DeepSeek, the same pipeline completed an issue in about six minutes for
 under ten cents (Figure~\ref{fig:providers}). The structure did not change across the three providers;
 only the model client and the limits did. DeepSeek needed 40 Builder turns instead of 20, because it
 tends to take one small step per turn.
@@ -243,9 +243,9 @@ tends to take one small step per turn.
 %==================================================================================================
 \section{Decision Experiments}
 
-Two decisions were tested on five seeded pull requests (\code{experiment/seeded\_prs/}). Four contain a
-deliberately planted bug and one is a correct fix. All five pass TinyDB's own test suite, so the bugs
-cannot be found simply by running the tests. The answer key was kept outside the repository until every
+I tested two decisions on five seeded pull requests (\code{experiment/seeded\_prs/}). Four contain a
+bug that I planted on purpose and one is a correct fix. All five pass TinyDB's own test suite, so the
+bugs cannot be found just by running the tests. I kept the answer key outside the repository until every
 review had finished. All experiment reviews ran on DeepSeek.
 
 \begin{itemize}
@@ -301,7 +301,7 @@ clean seed S5 most before approving it.}
 
 \textbf{Findings.} Neither change altered a single verdict. Every setup caught all four bugs and
 approved the clean pull request, each time citing the file and line and usually reproducing the bug
-with a probe. For both ADRs as written, this is a negative result: on these seeds, the structural
+with a probe. For both ADRs as I wrote them, this is a negative result: on these seeds, the structural
 controls (own job, no upstream artifacts, an evidence-based rubric) appear to do most of the work. Two
 differences were real. With the skeptical prompt, the Reviewer checked much more carefully before
 approving (seven probes on the clean pull request instead of three; Figure~\ref{fig:probes}), which is
@@ -309,19 +309,19 @@ the behaviour ADR-008 aimed for. Only V4 Pro recognised that the problem in S1 w
 than the code and routed it to the design stage. In a second round, this decides whether the change is
 re-planned or only patched. V4 Pro cost about 3.3 times as much as the baseline.
 
-\textbf{Changes made.} The Flash reviewer with the skeptical prompt was kept as the default. The
-experiment also exposed two harness bugs: the \code{model=} option did not accept DeepSeek model names,
+\textbf{What I changed.} I kept the Flash reviewer with the skeptical prompt as the default. The
+experiment also exposed two bugs in my harness: the \code{model=} option did not accept DeepSeek model names,
 and a review returned in the wrong JSON shape caused the job to crash. ADR-007 already allowed one
-format-repair pass, so the Reviewer now gets one chance to resubmit. A possible next step is to use
-V4 Pro only to confirm the routing of a REQUEST\_CHANGES verdict.
+format-repair pass, so I gave the Reviewer one chance to resubmit. If I continued, I would use V4 Pro
+only to confirm the routing of a REQUEST\_CHANGES verdict.
 
 %==================================================================================================
 \section{Results}
 
 All five issues passed through every stage. Each ended with a pull request that the Reviewer approved
-and that passes the hidden acceptance tests, which the agents never saw (Table~\ref{tab:results}).
-Pull request \#16 was built on the Gemini free tier, but the Gemini reviewer had no quota left, so it
-was reviewed later on DeepSeek V4 Pro. The other four were built and reviewed on DeepSeek.
+and that passes my hidden acceptance tests, which the agents never saw (Table~\ref{tab:results}).
+Pull request \#16 was built on the Gemini free tier, but the Gemini reviewer had no quota left, so I
+had it reviewed later on DeepSeek V4 Pro. The other four were built and reviewed on DeepSeek.
 
 \begin{table}[h]
 \centering\footnotesize
@@ -358,30 +358,31 @@ reached the stage.}
 \textbf{Pass rates.} Figure~\ref{fig:passrate} shows the pass rate per stage over all 14 full runs
 (\code{results/results.csv}). On the Gemini free tier, none of the five runs completed; they failed on
 overload and quota, and the single review that failed had no quota left. On DeepSeek, four of nine runs
-completed. The other five stopped on harness problems (turn limits set for Claude, a judge answer that
-was cut off, criteria written over several lines); each was fixed and the issue was run again. All runs
+completed. The other five stopped on problems in my harness (turn limits set for Claude, a judge answer that
+was cut off, criteria written over several lines); I fixed each one and ran the issue again. All runs
 together used about 5.9 million tokens and cost about \$0.85 on DeepSeek. The Gemini runs were free.
 
 \textbf{What the Reviewer caught.} On the seeded pull requests it found all four planted bugs, each with
-a probe, as well as real problems that were not planted: in S3, \code{limit=0} permanently caches an empty
+a probe, as well as real problems that I had not planted: in S3, \code{limit=0} permanently caches an empty
 result, and the crash in S4 leaves the data partly updated. It approved all five pull requests produced
 by the agents, but still noted points for a person to check. On \#6 it found that a user document whose
 only key is the reserved date tag would silently be converted into a date when read back.
 
 \textbf{Where it was wrong.} The Flash reviewer routed S1 to implementation, although the approach was
 the problem. On \#6, the reserved-key issue is arguably a real defect that it accepted as non-blocking.
-It also noticed that the seeded tests contained the word ``seeded'' in their names, an unintended hint.
+It also noticed that my seeded tests had the word ``seeded'' in their names, a hint I did not intend
+to give.
 
 %==================================================================================================
 \section{Hindsight}
 
-The first decision to change would be the model decision (ADR-006). Models were chosen for ability and
-price, and only at the first run did it become clear that they could not be used, and later that the
-Gemini free tier was too slow and too limited for this workload. In a new attempt, access, quotas and
-model behaviour would be treated as design inputs and checked with a one-call test before any agent code
-was written (the ``check models'' workflow was added only later). The provider and all limits would be
-configuration from the start; turn limits, timeouts and token caps had to change twice because they had
-been set for a model that was never run. The Planner would also have its single revision from the
+The first decision I would change is the model decision (ADR-006). I chose models for their ability
+and price, and only at the first run did I find out that I could not use them, and later that the Gemini
+free tier was too slow and too limited for this work. If I started again, I would treat access, quotas
+and model behaviour as design inputs and check them with a one-call test before writing any agent code
+(I only added the ``check models'' workflow later). I would also make the provider and all limits plain
+configuration from the start; I had to change the turn limits, timeouts and token caps twice because I
+had set them for a model I never ran. Finally, I would give the Planner its one revision from the
 beginning instead of halting, since the Builder already had retries.
 
 %==================================================================================================
@@ -391,10 +392,10 @@ beginning instead of halting, since the Builder already had retries.
 \item \textbf{Small sample.} Five issues and five seeded pull requests, with one run per experiment cell.
 A 4/4 against 4/4 tie says little about cases where the setups would differ, and one different verdict
 would change the picture.
-\item \textbf{Same author for the system and the tests.} The issues, hidden tests, seeds and prompts were
-all written by the author, so they may suit each other. The hidden tests for the vague issue accept more
+\item \textbf{I wrote everything I measured with.} The issues, hidden tests, seeds and prompts are all
+mine, so they may suit each other. The hidden tests for the vague issue accept more
 than one reasonable answer, which also makes them easier to pass.
-\item \textbf{The system changed during measurement.} The results come from a harness that changed over
+\item \textbf{The system changed while I measured it.} The results come from a harness that changed over
 time (two providers in real runs and several fixes). The final setup, Flash for every role, reviewed
 only two of the five issue pull requests; V4 Pro reviewed the other three.
 \item \textbf{Round 2 was never exercised in a real run.} Every agent pull request was approved in round
@@ -407,9 +408,9 @@ are now in the repository, so any later run could read them.
 \end{itemize}
 
 \vspace{2pt}
-{\small\textbf{Use of AI tools.} Claude Code was used as a coding assistant for parts of the harness and
-the documentation. All generated content was reviewed, and the design decisions in the ADRs are the
-author's own. Every run, pull request and review in this report is real and linked in
+{\small\textbf{Use of AI tools.} I used Claude Code to help build the harness and to draft parts of the
+documentation. I went through everything it produced, and the design decisions and the reasoning in
+the ADRs are my own. Every run, pull request and review in this report is real and linked in
 \code{results/runs.md}.}
 
 \end{document}
