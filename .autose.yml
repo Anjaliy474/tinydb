@@ -35,10 +35,10 @@ architecture_doc: ARCHITECTURE.md
 # The Claude setup from ADR-006 still works: put claude-* model names here and add
 # ANTHROPIC_API_KEY.
 models:
-  planner: gemini-3.7-flash
+  planner: gemini-3.5-flash
   judge: gemini-3.5-flash-lite
-  builder: gemini-3.8-flash
-  reviewer: gemini-3.1-pro-preview
+  builder: gemini-3.6-flash
+  reviewer: gemini-3.5-flash
 
 # Hard caps (ADR-009). Dollars are estimated from token usage and the price table in
 # budget.py (free-tier Gemini counts as $0, so the token caps do the work there).
