@@ -837,3 +837,10 @@ def test_lambda_query():
     query.is_cacheable = lambda: False
     assert db.search(query) == [{'foo': 'bar'}]
     assert not db._query_cache
+
+
+def test_remove_duplicate_ids_seeded():
+    db = TinyDB(storage=MemoryStorage)
+    db.insert_multiple([{'a': 1}, {'a': 2}])
+    assert db.remove(doc_ids=[2, 2]) == [2]
+    assert len(db) == 1
