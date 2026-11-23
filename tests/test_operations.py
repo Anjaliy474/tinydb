@@ -35,3 +35,20 @@ def test_increment(db):
 def test_decrement(db):
     db.update(decrement('int'), where('char') == 'a')
     assert db.get(where('char') == 'a')['int'] == 0
+
+
+def test_rename_seeded(db):
+    from tinydb.operations import rename
+    db.update(rename('char', 'letter'), where('char') == 'a')
+    assert db.get(where('letter') == 'a') == {'int': 1, 'letter': 'a'}
+    assert db.count(where('char').exists()) == 2
+
+
+def test_rename_missing_and_existing_field_seeded(db):
+    from tinydb.operations import rename
+    db.insert({'other': 1})
+    db.insert({'char': 'x', 'letter': 'old'})
+    db.update(rename('char', 'letter'))
+    assert db.get(where('other') == 1) == {'other': 1}
+    assert db.count(where('letter') == 'x') == 1
+    assert db.count(where('char').exists()) == 0
