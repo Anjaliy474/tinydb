@@ -30,19 +30,27 @@ denied_edit_paths:
 
 architecture_doc: ARCHITECTURE.md
 
+# Gemini free tier (ADR-011). Each role is on its own model because free-tier limits are
+# per model. Check what your key can use with the "AutoSE check models" workflow.
+# The Claude setup from ADR-006 still works: put claude-* model names here and add
+# ANTHROPIC_API_KEY.
 models:
-  planner: claude-sonnet-5-5
-  judge: claude-haiku-5-5
-  builder: claude-sonnet-5-5
-  reviewer: claude-opus-5-5
+  planner: gemini-2.5-flash
+  judge: gemini-2.5-flash-lite
+  builder: gemini-2.5-flash
+  reviewer: gemini-2.5-pro
 
-# Hard caps (ADR-009). Dollars are estimated from token usage and the price table in budget.py.
+# Hard caps (ADR-009). Dollars are estimated from token usage and the price table in
+# budget.py (free-tier Gemini counts as $0, so the token caps do the work there).
 budget:
   run_usd: 3.00
   run_tokens: 2000000
   plan_usd: 0.45
+  plan_tokens: 300000
   build_usd_per_round: 0.80
+  build_tokens_per_round: 1200000
   review_usd_per_round: 0.45
+  review_tokens_per_round: 500000
 
 limits:
   planner_turns: 10
