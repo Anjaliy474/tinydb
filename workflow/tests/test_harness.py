@@ -550,7 +550,7 @@ def test_gemini_retries_a_hanging_request(monkeypatch):
 
     sleeps = []
     assert llm_gemini.call_with_retry(flaky, model="m-timeout", sleep=sleeps.append) == "ok"
-    assert len(calls) == 2 and sleeps == [10.0]
+    assert len(calls) == 2 and sleeps == [15.0]
 
 
 def test_planner_gets_one_revision_after_a_failed_gate(conf, tmp_path, monkeypatch):
@@ -583,3 +583,38 @@ def test_planner_gets_one_revision_after_a_failed_gate(conf, tmp_path, monkeypat
     monkeypatch.setattr(plan, "make_agent", lambda **k: Scripted(ws, [vague, vague]))
     result = plan.run_spec(conf, ws, Budget(1, 10**6, "t"), {"number": 3, "title": "t", "body": "b"})
     assert not result.passed and len(sent) == 2  # only one revision, then it stops
+
+
+
+def test_gemini_server_errors_retry_then_end_cleanly(monkeypatch):
+    from autose import llm_gemini
+    from autose.llm import AgentError
+    monkeypatch.setattr(llm_gemini, "MIN_INTERVAL_S", 0)
+
+    class Server(Exception):
+        def __init__(self, code):
+            self.code = code
+
+    seq = [Server(503), Server(504), "ok"]
+
+    def flaky(**kwargs):
+        item = seq.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    sleeps = []
+    assert llm_gemini.call_with_retry(flaky, model="m-504", sleep=sleeps.append) == "ok"
+    assert sleeps == [15.0, 30.0]  # 504 is retried too (it crashed run 45173736214)
+
+    def always_400(**kwargs):
+        raise Server(400)
+
+    with pytest.raises(AgentError, match="400"):
+        llm_gemini.call_with_retry(always_400, model="m-400", sleep=sleeps.append)
+
+    def bug(**kwargs):
+        raise KeyError("not an API error")
+
+    with pytest.raises(KeyError):  # real bugs are not hidden
+        llm_gemini.call_with_retry(bug, model="m-bug", sleep=sleeps.append)

@@ -122,7 +122,7 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
                 if not revise_design(reason):
                     return finish(out, round_no, criteria, None, history, "design revision failed")
         return finish(out, round_no, criteria, None, history, failure or "no passing attempt")
-    except BudgetExceeded as exc:
+    except (BudgetExceeded, AgentError) as exc:  # e.g. the design revision hit an API error
         history.append(str(exc))
         return finish(out, round_no, criteria, None, history, str(exc))
     finally:

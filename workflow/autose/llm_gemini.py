@@ -70,7 +70,12 @@ def _pace(model: str, sleep) -> None:
     _last_call[model] = time.monotonic()
 
 
+TEMPORARY = (429, 500, 502, 503, 504)
+
+
 def call_with_retry(fn, *args, sleep=time.sleep, **kwargs):
+    """Call Gemini, waiting out temporary errors. Anything that still fails becomes an
+    AgentError, so the stage ends cleanly and writes its report instead of crashing."""
     waited = 0.0
     model = kwargs.get("model", "")
     for attempt in range(RETRIES):
@@ -80,22 +85,24 @@ def call_with_retry(fn, *args, sleep=time.sleep, **kwargs):
         except Exception as exc:  # google.genai.errors.APIError, but keep this import-free
             code = getattr(exc, "code", None)
             if code == 429 and is_daily_quota(exc):
-                print(f"[gemini] {model}: daily free quota used up")
+                print(f"[gemini] {model}: daily free quota used up", flush=True)
                 raise QuotaExhausted(
                     f"the free daily quota for {model} is used up; it resets at midnight "
                     "Pacific time (13:30 IST). Restart with /autose after that, or switch this "
                     "role to another model in .autose.yml") from exc
             timed_out = "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
-            if (code not in (429, 500, 503) and not timed_out) or attempt == RETRIES - 1:
-                raise
+            if code is None and not timed_out:
+                raise  # not an API problem: a real bug, let it show
             if timed_out:
                 code = "timeout"
-            delay = min(_retry_delay(exc) if code == 429 else 10.0 * (attempt + 1), MAX_WAIT_S - waited)
-            if delay <= 0:
-                raise
+            delay = min(_retry_delay(exc) if code == 429 else 15.0 * (attempt + 1),
+                        MAX_WAIT_S - waited)
+            if (code not in TEMPORARY and code != "timeout") or attempt == RETRIES - 1 or delay <= 0:
+                raise AgentError(f"Gemini API error from {model} ({code}): {str(exc)[:300]}") from exc
             print(f"[gemini] {model}: {code}, waiting {delay:.0f}s (attempt {attempt + 1})", flush=True)
             sleep(delay)
             waited += delay
+    raise AgentError(f"Gemini API: no answer from {model}")
 
 
 def charge(budget: Budget, model: str, response) -> None:
