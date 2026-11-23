@@ -100,6 +100,7 @@ None of these PRs are merged. That's left to a person, on purpose.
 - `experiment/seeded_prs/` – the seeded PR diffs and which bug each one has
 - `experiment/variants.md` – the two reviewer experiments and what they showed
 - `results/` – `results.csv`, `runs.md` and the script that builds them from GitHub
+- `report/` – the report (`report.pdf`), the demo video (`demo.mp4`) and its script
 
 ## AI use
 
