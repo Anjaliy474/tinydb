@@ -700,3 +700,80 @@ def test_build_stops_at_once_when_every_model_is_out(sandbox, tmp_path, monkeypa
     code = build.run(sandbox, out, 1, budget=Budget(1.0, 10**6, "t"),
                      make_builder=lambda ws: OutOfQuota())
     assert code == 1 and "no builder model available" in (out / "test_report.md").read_text()
+
+
+# --- the DeepSeek / OpenAI-format backend (ADR-013) -----------------------------------------
+
+def test_openai_agent_loop_retry_and_balance(monkeypatch):
+    from autose import llm_openai
+    from autose.llm import QuotaExhausted, make_agent
+
+    def call(name, args, id_):
+        return SimpleNamespace(id=id_, type="function",
+                               function=SimpleNamespace(name=name, arguments=json.dumps(args)))
+
+    class Msg(SimpleNamespace):
+        def model_dump(self, exclude_none=True):
+            return {"role": "assistant", "content": self.content,
+                    "reasoning_content": "thinking...", "tool_calls": [
+                        {"id": c.id, "type": "function",
+                         "function": {"name": c.function.name, "arguments": c.function.arguments}}
+                        for c in (self.tool_calls or [])]}
+
+    def reply(*calls, content=None):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=Msg(content=content, tool_calls=list(calls) or None),
+                                     finish_reason="tool_calls" if calls else "stop")],
+            usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=100,
+                                  prompt_cache_hit_tokens=200))
+
+    class Busy(Exception):
+        status_code = 503
+
+    queue = [Busy(), reply(call("echo", {"x": "a"}, "c1")), reply(call("done", {"ok": True}, "c2"))]
+    requests = []
+
+    def create(**kwargs):
+        requests.append(kwargs)
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    seen = []
+    tools_ = [Tool("echo", "echo", {"properties": {"x": {"type": "string"}}},
+                   lambda x: seen.append(x) or f"got {x}"),
+              Tool("done", "finish", {"properties": {"ok": {"type": "boolean"}}},
+                   lambda ok: "ok", stops=True)]
+    sleeps = []
+    original = llm_openai.call_with_retry
+    monkeypatch.setattr(llm_openai, "call_with_retry",
+                        lambda fn, **k: original(fn, sleep=sleeps.append, **k))
+    agent = make_agent(model="deepseek-flash", system="s", tools=tools_,
+                       budget=Budget(1, 10**6, "t"), max_turns=5, client=client)
+    assert type(agent).__name__ == "OpenAIAgent"
+    assert agent.send("go") == {"ok": True}
+    assert seen == ["a"] and sleeps == [10.0]
+    sent = requests[-1]["messages"]
+    assert sent[0] == {"role": "system", "content": "s"}
+    assert any(m.get("reasoning_content") for m in sent)  # passed back to DeepSeek
+    assert any(m.get("role") == "tool" and m["tool_call_id"] == "c1" for m in sent)
+    assert requests[-1]["tools"][0]["function"]["name"] == "echo"
+    # 800 uncached + 200 cached input, 100 output, at peak deepseek-flash prices
+    assert agent.budget.tokens == 2 * 1100
+    assert 0 < agent.budget.usd < 0.01
+
+    class NoMoney(Exception):
+        status_code = 402
+
+    def broke(**kwargs):
+        raise NoMoney()
+
+    with pytest.raises(QuotaExhausted, match="balance"):
+        original(broke, model="deepseek-flash", sleep=sleeps.append)
+
+
+def test_deepseek_key_is_stripped_from_test_runs(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
+    assert "DEEPSEEK_API_KEY" not in tools.clean_env()
