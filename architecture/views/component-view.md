@@ -13,8 +13,9 @@ flowchart LR
         ART[("Actions workflow artifacts<br/>spec.md, design.md, diff.patch,<br/>test_report.md, pr.md, review.md,<br/>run_state.json")]
     end
 
-    subgraph WF[".github/workflows/autose.yml (one run)"]
-        INTAKE["intake job<br/>trigger filter, maintainer check,<br/>restart checkpoint<br/><i>no LLM</i>"]
+    INTAKE["intake job · issues:read, pull-requests:read<br/>trigger filter, maintainer check,<br/>resolve issue number, read checkpoint<br/><i>no LLM</i>"]
+
+    subgraph WF["autose-pipeline.yml (reusable call, concurrency: autose-issue-N)"]
 
         subgraph PLAN["plan job · contents:read, issues:write"]
             A1["Agent 1: Planner<br/>Stage 1 Requirements, Stage 2 Design<br/>model: Sonnet 5.5"]
@@ -37,7 +38,11 @@ flowchart LR
             S5C["In-run CI, Stage 5 check<br/><i>no LLM</i><br/>ci_cmds at PR head, post autose/ci status"]
         end
 
-        subgraph REV["review-r1 / review-r2 job · contents:read, pull-requests:write"]
+        subgraph FIN["finalize-r1 / finalize-r2 job · issues:write"]
+            S7["Checkpoint writer<br/><i>no LLM</i><br/>review_rounds_used, summary comment"]
+        end
+
+        subgraph REV["review-r1 / review-r2 job · contents:read, issues:read, pull-requests:write"]
             A3["Agent 3: Independent Reviewer<br/>Stage 6<br/>model: GPT-5 (fallback Opus 5.5)"]
             T3["tools: read_file, search_code,<br/>git_diff, run_tests, write_artifact;<br/>gh pr review --comment"]
         end
@@ -69,20 +74,24 @@ flowchart LR
     GATES -.checks.-> PLAN & BUILD & REL & CI & REV
     BUDGET -.caps.-> PLAN & BUILD & REV
     PLAN & BUILD & REL & CI & REV -.upload.-> ART
-    INTAKE & REL -.update.-> STATUS
-    REV -->|approve, or 2 rounds used| HUMAN
+    PLAN & REL -.update.-> STATUS
+    STATUS -.->|bot-authored marker only| INTAKE
+    REV --> FIN
+    FIN -.update.-> STATUS
+    FIN -->|approve, or 2 rounds used| HUMAN
 ```
 
 ## What each component can and cannot do
 
 | Component | Job permissions | Can | Cannot |
 | :--- | :--- | :--- | :--- |
-| Intake | `issues: read` | Read the trigger event, check the actor's repo permission, read the status comment | Call any model |
+| Intake | `issues: read`, `pull-requests: read` | Read the trigger event and `author_association`, map a PR back to its issue, read the bot's status comment | Write anything, call any model |
 | Agent 1: Planner | `contents: read`, `issues: write` | Read the repo, write `spec.md` / `design.md`, update the status comment | Edit code, run shell commands, push |
 | Agent 2: Builder | `contents: read` | Edit files inside `allowed_edit_paths`, run build and tests locally | Push, call `gh` write commands, edit `.github/` or `workflow/` |
 | Release script | `contents: write`, `pull-requests: write`, `issues: write` | Push `autose/issue-N`, open or update the PR | Merge, push to `master`, run a model |
 | In-run CI | `contents: read`, `statuses: write` | Run `ci_cmds`, post the `autose/ci` status | Change code, PRs or issues |
-| Agent 3: Reviewer | `contents: read`, `pull-requests: write` | Read the issue, diff and repo at PR head, run tests, post a `COMMENT` review | Push, approve, merge, read Stage 1–5 artifacts |
+| Agent 3: Reviewer | `contents: read`, `issues: read`, `pull-requests: write` | Read the issue, diff and repo at PR head, run tests, post a `COMMENT` review | Push, approve, merge, read Stage 1–5 artifacts, write the checkpoint |
+| Finalize | `issues: write` | Record `review_rounds_used` in the status comment, post a summary | Change code or PRs, call any model |
 
 ## Information Barriers
 
@@ -91,3 +100,6 @@ flowchart LR
 - Untrusted issue text reaches only Agent 1 (Stage 1) and Agent 3, both read-only. The Builder
   works from `spec.md` and `design.md`, which have passed their gates (ADR-003, ADR-009).
 - `gates.py`, not the agents, decides pass or fail and which stage runs next (ADR-007).
+- Intake trusts the `autose-state` marker only in comments written by `github-actions[bot]` (ADR-004).
+- All pipeline jobs for one issue run under one `concurrency` group, so two runs for the same issue
+  never interleave, even when one starts from the issue and the other from its PR (ADR-010).
