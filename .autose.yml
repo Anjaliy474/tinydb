@@ -35,7 +35,7 @@ architecture_doc: ARCHITECTURE.md
 # The Claude setup from ADR-006 still works: put claude-* model names here and add
 # ANTHROPIC_API_KEY.
 models:
-  planner: gemini-3.5-flash
+  planner: gemini-3.5-flash-lite
   judge: gemini-3.5-flash-lite
   builder: gemini-3.6-flash
   reviewer: gemini-3.5-flash
@@ -53,7 +53,7 @@ budget:
   review_tokens_per_round: 500000
 
 limits:
-  planner_turns: 10
+  planner_turns: 8
   builder_turns: 20
   reviewer_turns: 12
   attempts_per_cycle: 3

@@ -5,6 +5,7 @@ are Gemini models on the free tier. The free tier has small per-minute and per-d
 every call waits and retries on HTTP 429 instead of failing the stage straight away.
 """
 import json
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -14,12 +15,16 @@ from .budget import Budget
 from .llm import MAX_TOOL_OUTPUT, AgentError, Tool, _short
 
 MAX_WAIT_S = 600       # give up on one call after waiting this long in total
+REQUEST_TIMEOUT_MS = 120_000
 RETRIES = 8
 
 
 def make_client():
     from google import genai
-    return genai.Client()  # reads GEMINI_API_KEY from the environment
+    from google.genai import types
+    # A request that hangs fails after 2 minutes and is retried, instead of blocking the job
+    # until GitHub cancels it (that is what happened on the first run).
+    return genai.Client(http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS))  # reads GEMINI_API_KEY
 
 
 def _schema(tool: Tool) -> dict:
@@ -36,24 +41,59 @@ def _schema(tool: Tool) -> dict:
     return schema
 
 
+class QuotaExhausted(AgentError):
+    """The free daily quota for a model is used up. Waiting won't help until it resets
+    (midnight Pacific time), so the stage stops at once and says so."""
+
+
+# Spacing between calls, so a burst of tool calls doesn't run into the per-minute limit.
+MIN_INTERVAL_S = float(os.environ.get("AUTOSE_GEMINI_MIN_INTERVAL", "4"))
+_last_call: dict[str, float] = {}
+
+
 def _retry_delay(exc: Exception) -> float:
     match = re.search(r"retry(?:Delay| in)[\"': ]+([\d.]+)s", str(exc), re.I)
     return float(match.group(1)) + 1 if match else 30.0
 
 
+def is_daily_quota(exc: Exception) -> bool:
+    text = str(exc)
+    return bool(re.search(r"PerDay|per[ _]day|RequestsPerDay|daily", text, re.I))
+
+
+def _pace(model: str, sleep) -> None:
+    last = _last_call.get(model)
+    if last is not None:
+        gap = MIN_INTERVAL_S - (time.monotonic() - last)
+        if gap > 0:
+            sleep(gap)
+    _last_call[model] = time.monotonic()
+
+
 def call_with_retry(fn, *args, sleep=time.sleep, **kwargs):
     waited = 0.0
+    model = kwargs.get("model", "")
     for attempt in range(RETRIES):
+        _pace(model, sleep)
         try:
             return fn(*args, **kwargs)
         except Exception as exc:  # google.genai.errors.APIError, but keep this import-free
             code = getattr(exc, "code", None)
-            if code not in (429, 500, 503) or attempt == RETRIES - 1:
+            if code == 429 and is_daily_quota(exc):
+                print(f"[gemini] {model}: daily free quota used up")
+                raise QuotaExhausted(
+                    f"the free daily quota for {model} is used up; it resets at midnight "
+                    "Pacific time (13:30 IST). Restart with /autose after that, or switch this "
+                    "role to another model in .autose.yml") from exc
+            timed_out = "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower()
+            if (code not in (429, 500, 503) and not timed_out) or attempt == RETRIES - 1:
                 raise
+            if timed_out:
+                code = "timeout"
             delay = min(_retry_delay(exc) if code == 429 else 10.0 * (attempt + 1), MAX_WAIT_S - waited)
             if delay <= 0:
                 raise
-            print(f"[gemini] HTTP {code}, waiting {delay:.0f}s (attempt {attempt + 1})")
+            print(f"[gemini] {model}: {code}, waiting {delay:.0f}s (attempt {attempt + 1})", flush=True)
             sleep(delay)
             waited += delay
 
@@ -113,6 +153,7 @@ class GeminiAgent:
             if self.turns >= self.max_turns:
                 raise AgentError(f"turn limit reached ({self.max_turns})")
             self.turns += 1
+            print(f"[gemini] {self.model} turn {self.turns}", flush=True)
             response = call_with_retry(self.client.models.generate_content, model=self.model,
                                        contents=self.contents, config=self._config)
             charge(self.budget, self.model, response)

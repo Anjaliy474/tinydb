@@ -4,6 +4,7 @@
     python -m autose.plan --design-only --reason r.md   # revise design.md (escalation / review)
 """
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,12 +15,29 @@ from .llm import AgentError, make_agent, ask_json_any as ask_json
 from .tools import Workspace, planner_tools
 
 
+def repo_context(conf, with_architecture: bool = True) -> str:
+    """The file list (and ARCHITECTURE.md) up front, so the planner doesn't spend a model call
+    on every directory listing. On the free tier each call can mean a wait (ADR-011)."""
+    files = [f for f in ws_files(conf) if f.startswith(tuple(conf.allowed_paths))]
+    text = "Files in the repository you may plan changes to:\n" + "\n".join(files)
+    if with_architecture:
+        doc = (conf.repo_root / conf["architecture_doc"]).read_text(encoding="utf-8")
+        text += f"\n\nARCHITECTURE.md:\n\n{doc}"
+    return text
+
+
+def ws_files(conf) -> list[str]:
+    out = subprocess.run(["git", "ls-files"], cwd=conf.repo_root, capture_output=True, text=True)
+    return [line for line in out.stdout.splitlines() if line]
+
+
 def run_spec(conf, ws, budget, issue: dict, client=None) -> gates.GateResult:
     agent = make_agent(model=conf.model("planner"), system=cfg.prompt("planner_spec"),
                   tools=planner_tools(ws, "spec.md"), budget=budget,
                   max_turns=conf.limit("planner_turns"), client=client)
-    agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) +
-               "\n\nWrite spec.md for this issue.")
+    agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) + "\n\n" +
+               repo_context(conf) +
+               "\n\nRead only the source files you need, then write spec.md for this issue.")
     spec = ws.submitted.get("spec.md", "")
 
     def judge(criteria):
@@ -37,11 +55,10 @@ def run_design(conf, ws, budget, spec: str, reason: str = "", client=None) -> ga
                   system=cfg.prompt("planner_design", allowed_paths=allowed),
                   tools=planner_tools(ws, "design.md"), budget=budget,
                   max_turns=conf.limit("planner_turns"), client=client)
-    architecture = (conf.repo_root / conf["architecture_doc"]).read_text(encoding="utf-8")
-    message = f"spec.md:\n\n{spec}\n\nARCHITECTURE.md:\n\n{architecture}\n"
+    message = f"spec.md:\n\n{spec}\n\n{repo_context(conf)}\n"
     if reason:
         message += f"\nRevise the design. Reason:\n\n{reason}\n"
-    agent.send(message + "\nWrite design.md.")
+    agent.send(message + "\nRead the files you plan to change, then write design.md.")
     return gates.gate_design(ws.submitted.get("design.md", ""), conf)
 
 
