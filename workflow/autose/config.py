@@ -20,9 +20,18 @@ class Config:
     def limit(self, name: str) -> int:
         return int(self.raw["limits"][name])
 
+    def models(self, role: str) -> list[str]:
+        """The role's models in order of preference. A role can list several so a run can move
+        on when one model's free quota is gone (ADR-011). An env var (used by the experiments)
+        pins a single model."""
+        pinned = os.environ.get(f"AUTOSE_{role.upper()}_MODEL")
+        if pinned:
+            return [pinned]
+        value = self.raw["models"][role]
+        return [value] if isinstance(value, str) else list(value)
+
     def model(self, role: str) -> str:
-        # Env vars let an experiment swap a model without changing the config file.
-        return os.environ.get(f"AUTOSE_{role.upper()}_MODEL") or self.raw["models"][role]
+        return self.models(role)[0]
 
     @property
     def allowed_paths(self) -> list[str]:

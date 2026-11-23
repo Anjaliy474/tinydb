@@ -67,6 +67,7 @@ jobs:
     permissions: {contents: read}
     outputs:
       base_sha: ${{ steps.build.outputs.base_sha }}
+      builder_model: ${{ steps.build.outputs.builder_model }}
     steps:
       - uses: actions/checkout@v4
         with: {path: harness, persist-credentials: false}
@@ -142,7 +143,7 @@ jobs:
 
   review-r1:
     name: "Stage 6: independent review (round 1)"
-    needs: [release-r1, ci-r1]
+    needs: [build-r1, release-r1, ci-r1]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Read-only code access, no artifacts from earlier stages are downloaded here (ADR-008).
@@ -161,6 +162,7 @@ jobs:
         working-directory: repo
         run: python -m autose.review --issue "${{ inputs.issue }}" --pr "${{ needs.release-r1.outputs.pr_number }}" --round "${{ inputs.first_round }}"
         env:
+          AUTOSE_AVOID_MODEL: ${{ needs.build-r1.outputs.builder_model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ github.token }}
@@ -200,6 +202,7 @@ jobs:
     permissions: {contents: read}
     outputs:
       base_sha: ${{ steps.build.outputs.base_sha }}
+      builder_model: ${{ steps.build.outputs.builder_model }}
     steps:
       - uses: actions/checkout@v4
         with: {path: harness, persist-credentials: false}
@@ -285,7 +288,7 @@ jobs:
 
   review-r2:
     name: "Stage 6: independent review (round 2)"
-    needs: [release-r2, ci-r2]
+    needs: [rework-r2, release-r2, ci-r2]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions: {contents: read, issues: read, pull-requests: write}
@@ -303,6 +306,7 @@ jobs:
         working-directory: repo
         run: python -m autose.review --issue "${{ inputs.issue }}" --pr "${{ needs.release-r2.outputs.pr_number }}" --round 2
         env:
+          AUTOSE_AVOID_MODEL: ${{ needs.rework-r2.outputs.builder_model }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ github.token }}

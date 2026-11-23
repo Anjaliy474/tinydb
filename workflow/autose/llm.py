@@ -17,6 +17,27 @@ class AgentError(RuntimeError):
     pass
 
 
+class ModelUnavailable(AgentError):
+    """This model can't be used right now (daily quota gone, overloaded, or not offered).
+    The caller can try the next model in the role's list."""
+
+
+class QuotaExhausted(ModelUnavailable):
+    """The free daily quota for a model is used up; it resets at midnight Pacific time."""
+
+
+def run_with_fallback(models: list[str], attempt, label: str):
+    """Call attempt(model) for each model in turn until one isn't ModelUnavailable (ADR-011)."""
+    last: Exception = AgentError(f"{label}: no models configured")
+    for model in models:
+        try:
+            return attempt(model)
+        except ModelUnavailable as exc:
+            print(f"{label}: {model} can't be used ({exc}); trying the next model", flush=True)
+            last = exc
+    raise last
+
+
 def make_client():
     import anthropic
     return anthropic.Anthropic(max_retries=4, timeout=600)

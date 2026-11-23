@@ -17,7 +17,7 @@ from typing import Callable, Optional
 from . import config as cfg
 from . import gates
 from .budget import Budget, BudgetExceeded
-from .llm import Agent, AgentError, make_agent
+from .llm import Agent, AgentError, ModelUnavailable, make_agent
 from .plan import run_design
 from .tools import Workspace, builder_tools, tail
 
@@ -54,10 +54,13 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
     criteria = gates.acceptance_criteria(spec)
     history: list[str] = []
 
+    models = conf.models("builder")
+    current = {"index": 0}
+
     def builder(ws: Workspace) -> Agent:
         if make_builder:
             return make_builder(ws)
-        return make_agent(model=conf.model("builder"),
+        return make_agent(model=models[current["index"]],
                      system=cfg.prompt("builder", allowed_paths=", ".join(conf.allowed_paths)),
                      tools=builder_tools(ws), budget=budget,
                      max_turns=conf.limit("builder_turns"), client=client)
@@ -84,13 +87,34 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
                 reset_tree(repo, base)
             ws = Workspace(conf, base, out)
             agent = builder(ws)
-            message = first_message(spec, design_path.read_text(encoding="utf-8"),
+            opening = first_message(spec, design_path.read_text(encoding="utf-8"),
                                     review if route == "implementation" else "")
+            message = opening
             last_signature, failure = None, ""
             for attempt in range(1, conf.limit("attempts_per_cycle") + 1):
                 label = f"cycle {cycle} attempt {attempt}"
                 try:
-                    agent.send(message)
+                    while True:
+                        try:
+                            agent.send(message)
+                            break
+                        except ModelUnavailable as exc:
+                            # Out of quota or overloaded: start this attempt again on the next
+                            # model in the list, from a clean tree (ADR-011).
+                            if current["index"] + 1 >= len(models):
+                                raise
+                            history.append(f"{label}: {models[current['index']]} unavailable "
+                                           f"({exc}); switching to {models[current['index'] + 1]}")
+                            current["index"] += 1
+                            reset_tree(repo, base)
+                            ws = Workspace(conf, base, out)
+                            agent = builder(ws)
+                            message = opening
+                except ModelUnavailable as exc:
+                    # Every builder model is out: a design revision wouldn't help, stop now.
+                    history.append(f"{label}: no builder model available: {exc}")
+                    return finish(out, round_no, criteria, None, history,
+                                  f"no builder model available ({exc})")
                 except AgentError as exc:
                     failure = f"builder stopped: {exc}"
                     history.append(f"{label}: {failure}")
@@ -127,6 +151,8 @@ def run(conf: cfg.Config, out: Path, round_no: int, review: str = "", route: str
         return finish(out, round_no, criteria, None, history, str(exc))
     finally:
         budget.save(out)
+        # The reviewer job uses this to stay off the builder's model (ADR-008, ADR-011).
+        set_output(builder_model=models[current["index"]])
 
 
 def finish(out: Path, round_no: int, criteria: dict, passed, history: list[str], error: str,

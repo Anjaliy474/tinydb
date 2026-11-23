@@ -15,7 +15,7 @@ import sys
 from . import config as cfg
 from . import gates, github
 from .budget import Budget, BudgetExceeded
-from .llm import AgentError, make_agent
+from .llm import AgentError, make_agent, run_with_fallback
 from .tools import Workspace, reviewer_tools
 
 MAX_DIFF = 40_000
@@ -46,6 +46,13 @@ def render(review: dict, round_no: int, model: str) -> tuple[str, str]:
     return md, comment
 
 
+def reviewer_models(models: list[str], avoid: str) -> list[str]:
+    """The reviewer never uses the model that built the change (ADR-008, ADR-011), unless that
+    would leave no model at all (then the review says which model it used)."""
+    kept = [m for m in models if m != avoid]
+    return kept or models
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--issue", type=int, required=True)
@@ -60,7 +67,7 @@ def main() -> int:
     ws = Workspace(conf, base, out)
     budget = Budget(conf["budget"]["review_usd_per_round"], conf["budget"]["review_tokens_per_round"],
                     f"review-r{args.round}")
-    model = conf.model("reviewer")
+    models = reviewer_models(conf.models("reviewer"), os.environ.get("AUTOSE_AVOID_MODEL", ""))
     issue = github.fetch_issue(args.issue)
     diff = ws.git_diff()
     if len(diff) > MAX_DIFF:
@@ -69,11 +76,18 @@ def main() -> int:
     prompt_name = os.environ.get("AUTOSE_REVIEWER_PROMPT") or "reviewer"
     if prompt_name not in ("reviewer", "reviewer_plain"):
         prompt_name = "reviewer"
-    agent = make_agent(model=model, system=cfg.prompt(prompt_name), tools=reviewer_tools(ws),
-                  budget=budget, max_turns=conf.limit("reviewer_turns"), effort="high")
+    message = (github.issue_prompt(issue, conf.limit("issue_max_chars")) +
+               f"\n\nPull request #{args.pr} diff:\n\n```diff\n{diff}\n```\n\nReview it.")
+
+    def attempt(model):
+        ws.submitted.pop("review", None)
+        agent = make_agent(model=model, system=cfg.prompt(prompt_name), tools=reviewer_tools(ws),
+                           budget=budget, max_turns=conf.limit("reviewer_turns"), effort="high")
+        agent.send(message)
+        return model, agent
+
     try:
-        agent.send(github.issue_prompt(issue, conf.limit("issue_max_chars")) +
-                   f"\n\nPull request #{args.pr} diff:\n\n```diff\n{diff}\n```\n\nReview it.")
+        model, agent = run_with_fallback(models, attempt, "reviewer")
         review = ws.submitted["review"]
         ran_tests = any(e.get("tool") == "run_tests" and not e.get("error") for e in agent.log)
         result = gates.gate_review(review, args.round, ran_tests)
