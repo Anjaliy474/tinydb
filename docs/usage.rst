@@ -643,6 +643,15 @@ To use the in-memory storage, use:
     user-controlled values for callable arguments (e.g. ``default`` or
     ``cls``) as they are executed in-process on every write operation.
 
+.. note::
+    ``JSONStorage`` stores ``datetime.datetime`` and ``datetime.date`` values
+    in a tagged on-disk form, e.g.
+    ``{"__tinydb_datetime__": "2024-05-17T12:30:45"}``, and reads them back as
+    the original objects. Plain strings are never converted, even if they look
+    like a date. Passing your own ``default`` or ``cls`` argument takes
+    precedence over this behaviour, in which case you have to handle dates
+    yourself.
+
 To modify the default storage for all ``TinyDB`` instances, set the
 ``default_storage_class`` class variable:
 
