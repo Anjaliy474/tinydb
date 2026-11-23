@@ -46,6 +46,31 @@ def render(review: dict, round_no: int, model: str) -> tuple[str, str]:
     return md, comment
 
 
+def format_problems(review: dict) -> list[str]:
+    """Shape problems in a submit_review call. Not every model follows the tool schema
+    strictly (a DeepSeek review on PR #25 sent `true` instead of {ok, finding})."""
+    problems = []
+    for dim in gates.DIMENSIONS:
+        item = review.get(dim)
+        if not isinstance(item, dict) or not str(item.get("finding", "")).strip():
+            problems.append(f"{dim} must be an object with 'ok' (true/false) and a 'finding' sentence")
+    if not isinstance(review.get("defects", []), list) or any(
+            not isinstance(d, dict) for d in review.get("defects", [])):
+        problems.append("defects must be a list of objects with file, line, description, blocking")
+    return problems
+
+
+def normalise(review: dict) -> dict:
+    """Make sure the gate and the renderer can read the review, whatever shape it came in."""
+    out = dict(review)
+    for dim in gates.DIMENSIONS:
+        item = out.get(dim)
+        out[dim] = item if isinstance(item, dict) else {"ok": bool(item), "finding": ""}
+    defects = out.get("defects")
+    out["defects"] = [d for d in defects if isinstance(d, dict)] if isinstance(defects, list) else []
+    return out
+
+
 def reviewer_models(models: list[str], avoid: str) -> list[str]:
     """The reviewer never uses the model that built the change (ADR-008, ADR-011), unless that
     would leave no model at all (then the review says which model it used)."""
@@ -89,6 +114,15 @@ def main() -> int:
     try:
         model, agent = run_with_fallback(models, attempt, "reviewer")
         review = ws.submitted["review"]
+        problems = format_problems(review)
+        if problems:
+            # One format-repair pass (ADR-007): the content stays the reviewer's own.
+            print("submit_review input was malformed, asking for one resubmit: " + "; ".join(problems))
+            agent.max_turns += 3
+            agent.send("Your submit_review call had format problems:\n- " + "\n- ".join(problems) +
+                       "\n\nCall submit_review again with the same review in the right format.")
+            review = ws.submitted["review"]
+        review = normalise(review)
         ran_tests = any(e.get("tool") == "run_tests" and not e.get("error") for e in agent.log)
         result = gates.gate_review(review, args.round, ran_tests)
         md, comment = render(review, args.round, f"{model}, {prompt_name} prompt")

@@ -813,3 +813,23 @@ status: ok
     assert "then no exception is raised" in criteria["AC-1"]
     ok = lambda c: {"criteria": [{"id": k, "testable": True, "reason": ""} for k in c]}  # noqa: E731
     assert gates.gate_spec(spec, ok).passed
+
+
+
+def test_review_format_problems_and_normalise():
+    from autose.review import format_problems, normalise
+    good = review_payload()
+    assert format_problems(good) == []
+    bad = dict(good, issue_fidelity=True, defects="none")
+    problems = format_problems(bad)
+    assert any("issue_fidelity" in p for p in problems) and any("defects" in p for p in problems)
+    fixed = normalise(bad)
+    assert fixed["issue_fidelity"] == {"ok": True, "finding": ""} and fixed["defects"] == []
+    assert not gates.gate_review(fixed, 1, True).passed  # still fails, cleanly, without a crash
+
+
+def test_intake_accepts_deepseek_reviewer_model():
+    on_pr = event(issue={"number": 24, "state": "open", "pull_request": {}},
+                  comment={"body": "/autose review model=deepseek-v4-pro", "author_association": "OWNER"})
+    res = intake.decide("issue_comment", on_pr, CONF, lambda n: {"headRefName": "x", "body": "Fixes #3"})
+    assert res["proceed"] == "true" and res["review_model"] == "deepseek-v4-pro"
