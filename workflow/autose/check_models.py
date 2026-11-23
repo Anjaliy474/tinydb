@@ -3,6 +3,7 @@
 Run by hand from the Actions tab ("AutoSE check models") before the first run, since free-tier
 models change often.
 """
+import os
 import sys
 
 from . import config as cfg
@@ -18,8 +19,11 @@ def main() -> int:
             print(f"  {model.name.removeprefix('models/')}")
     conf = cfg.load()
     ok = True
-    print("\nTrying the configured models:")
-    for role, name in conf["models"].items():
+    to_try = list(conf["models"].items())
+    extra = [m.strip() for m in os.environ.get("EXTRA_MODELS", "").split(",") if m.strip()]
+    to_try += [("extra", m) for m in extra]
+    print("\nTrying the configured models (and any extra ones given):")
+    for role, name in to_try:
         if not name.startswith("gemini"):
             print(f"  {role:9s} {name}: not a Gemini model, skipped")
             continue
@@ -27,7 +31,8 @@ def main() -> int:
             reply = client.models.generate_content(model=name, contents="Reply with the word ok.")
             print(f"  {role:9s} {name}: works ({(reply.text or '').strip()[:20]!r})")
         except Exception as exc:
-            ok = False
+            if role != "extra":  # a failing extra model doesn't fail the check
+                ok = False
             print(f"  {role:9s} {name}: FAILED {getattr(exc, 'code', '')} {str(exc)[:200]}")
     return 0 if ok else 1
 

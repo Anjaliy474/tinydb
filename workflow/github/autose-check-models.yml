@@ -5,6 +5,11 @@ name: AutoSE check models
 
 on:
   workflow_dispatch:
+    inputs:
+      extra_models:
+        description: Other model names to try, comma separated
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -21,3 +26,4 @@ jobs:
         env:
           PYTHONPATH: workflow
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EXTRA_MODELS: ${{ inputs.extra_models }}
