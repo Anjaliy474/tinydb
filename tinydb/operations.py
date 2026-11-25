@@ -73,3 +73,13 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
         doc[field] -= 1
 
     return transform
+
+
+def rename(old: str, new: str) -> Callable[[MutableMapping], None]:
+    """
+    Rename the field ``old`` to ``new``.
+    """
+    def transform(doc: MutableMapping):
+        doc[new] = doc.pop(old)
+
+    return transform
